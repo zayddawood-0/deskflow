@@ -6,13 +6,13 @@ Time boxes assume ~half-day blocks; the order is chosen so there is always a **d
 
 ## Phase 1 — Scaffold & pipeline (first ~2 h)
 
-- [ ] 1.1 Create monorepo skeleton: `frontend/`, `backend/`, `docs/`, `.github/workflows/`, root `README.md`, `AGENTS.md`, `docker-compose.yml` (db service only), `.gitignore` (Python+Node+`.env*`)
-- [ ] 1.2 Backend skeleton: venv + `requirements.txt`/`requirements-dev.txt` pinned, `app/main.py` with `create_app()`, `GET /api/v1/health` returning `{status, database, version}`, `app/core/config.py` (pydantic-settings, incl. `internal_task_token`), CORS, JSON logging + request-id middleware
-- [ ] 1.3 Alembic initialized (`alembic.ini`, `env.py` wiring `Base.metadata`); empty DB migrated against Docker Postgres
-- [ ] 1.4 Frontend skeleton: `create-next-app` (TS strict, Tailwind, App Router, `src/`), Manrope via `next/font`, design tokens in `tailwind.config.ts` + `globals.css` (copy from DESIGN_SYSTEM §1), base UI primitives: `Button`, `IconButton`, `Card`, `Input`, `Skeleton`
-- [ ] 1.5 `frontend/src/lib/api-client.ts` (same-origin `/api/v1` base via rewrites, Bearer from memory, refresh-once w/ cookie, `ApiError`) + `types/api.ts` envelopes + `constants.ts` enums + `next.config.ts` rewrite to `BACKEND_URL`
+- [x] 1.1 Create monorepo skeleton: `frontend/`, `backend/`, `docs/`, `.github/workflows/`, root `README.md`, `AGENTS.md`, `docker-compose.yml` (db service only), `.gitignore` (Python+Node+`.env*`)
+- [x] 1.2 Backend skeleton: venv + `requirements.txt`/`requirements-dev.txt` pinned, `app/main.py` with `create_app()`, `GET /api/v1/health` returning `{status, database, version}`, `app/core/config.py` (pydantic-settings, incl. `internal_task_token`), CORS, JSON logging + request-id middleware
+- [x] 1.3 Alembic initialized (`alembic.ini`, `env.py` wiring `Base.metadata`); empty DB migrated against Docker Postgres
+- [x] 1.4 Frontend skeleton: `create-next-app` (TS strict, Tailwind, App Router, `src/`), Manrope via `next/font`, design tokens in `tailwind.config.ts` + `globals.css` (copy from DESIGN_SYSTEM §1), base UI primitives: `Button`, `IconButton`, `Card`, `Input`, `Skeleton`
+- [x] 1.5 `frontend/src/lib/api-client.ts` (same-origin `/api/v1` base via rewrites, Bearer from memory, refresh-once w/ cookie, `ApiError`) + `types/api.ts` envelopes + `constants.ts` enums + `next.config.ts` rewrite to `BACKEND_URL`
 - [ ] 1.6 CI: `.github/workflows/ci.yml` as in DEPLOYMENT §5.1; push branch, confirm **green** (health test included: `test_health.py`)
-- [ ] 1.7 `docker compose up --build` sanity check (all three services); revert to db-only dev mode
+- [x] 1.7 `docker compose up --build` sanity check (all three services); revert to db-only dev mode
 
 ## Phase 2 — Data model, auth, RBAC (~3 h)
 

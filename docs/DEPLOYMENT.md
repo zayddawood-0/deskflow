@@ -127,7 +127,7 @@ on:
 jobs:
   backend:
     name: Backend (ruff + pytest)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: backend
@@ -149,8 +149,8 @@ jobs:
       SECRET_KEY: ci-only-secret-key-not-used-in-prod
       APP_ENV: development
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -161,13 +161,13 @@ jobs:
 
   frontend:
     name: Frontend (lint + types + build)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
@@ -195,15 +195,15 @@ concurrency:
 jobs:
   migrate:
     name: Alembic → Neon
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: backend
     env:
       DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -213,7 +213,7 @@ jobs:
   deploy-backend:
     name: Render deploy hook
     needs: migrate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Trigger Render deploy
         run: curl --fail --silent --show-error -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
@@ -221,7 +221,7 @@ jobs:
   deploy-frontend:
     name: Vercel production deploy
     needs: migrate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
@@ -231,8 +231,8 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       BACKEND_URL: https://deskflow-api.onrender.com
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
@@ -262,7 +262,7 @@ on:
 jobs:
   keep-warm:
     name: Ping API health (keep Render warm)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: GET /api/v1/health
         run: |
@@ -271,7 +271,7 @@ jobs:
 
   sla-scan:
     name: SLA breach / at-risk scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: POST /api/v1/internal/sla-scan
         run: |

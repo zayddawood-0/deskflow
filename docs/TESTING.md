@@ -141,7 +141,7 @@ MVP gate (runs in CI, no extra framework):
 | Check | Command | Fails on |
 |---|---|---|
 | Lint | `npm run lint` | ESLint errors (incl. `no-explicit-any`), unused vars |
-| Types | `npm run typecheck` (`tsc --noEmit`) | any `any`, prop mismatches vs `types/api.ts` |
+| Types | `npm run typecheck` (`next typegen && tsc --noEmit`) | any `any`, prop mismatches vs `types/api.ts` |
 | Build | `npm run build` | Server component/client boundary violations, bad `next/font` usage, missing env at build |
 
 Component tests (**stretch** — only if the schedule allows; Vitest + React Testing Library in `src/components/__tests__/`):
