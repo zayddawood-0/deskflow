@@ -74,13 +74,14 @@ flowchart LR
         A[FastAPI on Render<br/>/api/v1 · routers → services → repositories]
     end
     DB[(PostgreSQL 16<br/>Neon in prod · Docker locally)]
-    B -- HTTPS / JSON + Bearer JWT --> A
+    B -- "same-origin /api/v1/* (Bearer JWT in memory<br/>+ httpOnly refresh cookie)" --> A
     A -- SQLAlchemy 2.0 sync --> DB
     GH[GitHub Actions] -- CI: ruff, pytest, lint, tsc, build --> B & A
     GH -- CD: alembic upgrade head → Neon, deploy hook → Render, vercel deploy --prod --> A & B
+    GH -- "Scheduled */15 min: health ping + SLA scan" --> A
 ```
 
-- **Request flow:** Next.js page (server component) or client hook → `src/lib/api-client.ts` attaches `Authorization: Bearer <access_token>` → FastAPI router validates input + permissions → service (business rules, state machine, SLA, audit) → repository (SQL) → PostgreSQL.
+- **Request flow:** Next.js page (server component) or client hook → `src/lib/api-client.ts` attaches `Authorization: Bearer <access_token>` → the request goes **same-origin** to `/api/v1/*` and is proxied server-side (Next.js `rewrites()`, `BACKEND_URL`) to FastAPI, which validates input + permissions → service (business rules, state machine, SLA, audit) → repository (SQL) → PostgreSQL. The refresh token never touches JS — it is an httpOnly cookie scoped to `/api/v1/auth`.
 - Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Tech stack
@@ -150,17 +151,17 @@ Full reference: [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md).
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifetime | `30` |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token lifetime | `14` |
 | `DATABASE_URL` | SQLAlchemy DB URL | `postgresql+psycopg2://deskflow:deskflow@localhost:5432/deskflow` |
-| `CORS_ORIGINS` | Comma-separated allowed origins | `http://localhost:3000` |
+| `CORS_ORIGINS` | Allowed origins — only for direct-to-API testing (the app goes same-origin through the Next rewrite proxy) | `http://localhost:3000` |
 | `SLA_AT_RISK_THRESHOLD` | Fraction of SLA used that means AT_RISK | `0.75` |
 | `REOPEN_WINDOW_DAYS` | Days after CLOSED during which a ticket can be reopened | `7` |
-| `SLA_SCAN_SECRET` | Shared secret for `POST /api/v1/internal/sla-scan` | `local-scan-secret` |
+| `INTERNAL_TASK_TOKEN` | `X-Internal-Token` header required by `POST /api/v1/internal/sla-scan` (set by the GitHub scheduled workflow; must match its secret) | `local-internal-token` |
 | `LOG_LEVEL` | `DEBUG` \| `INFO` \| `WARNING` | `INFO` |
 
 ### Frontend — `frontend/.env.local`
 
 | Variable | Purpose | Example (local) |
 |---|---|---|
-| `NEXT_PUBLIC_API_URL` | Base URL of the API including `/api/v1` | `http://localhost:8000/api/v1` |
+| `BACKEND_URL` | Server-side origin of the API, consumed by the `/api/:path*` rewrite in `next.config.ts` (never sent to the browser) | `http://localhost:8000` |
 | `NEXT_PUBLIC_APP_NAME` | Display name | `DeskFlow` |
 
 ## Testing
@@ -186,6 +187,8 @@ Push to `main` triggers `.github/workflows/deploy.yml`:
 2. **Backend** — a `curl` hits the Render deploy hook (`RENDER_DEPLOY_HOOK_URL`), which rebuilds and redeploys `deskflow-api`.
 3. **Frontend** — the Vercel CLI (`vercel pull && vercel build --prod && vercel deploy --prebuilt --prod`) ships `deskflow-web` with `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
 
+Additionally, `.github/workflows/scheduled.yml` runs every 15 minutes: it pings `GET /api/v1/health` (keeps the Render free instance warm) and calls `POST /api/v1/internal/sla-scan` with `X-Internal-Token` (`INTERNAL_TASK_TOKEN` secret) so SLA breaches are flagged and notified even when nobody has the app open — the scan is idempotent, so double runs change nothing.
+
 Full setup guide (Neon/Render/Vercel, all secrets, rollback, post-deploy smoke test): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Project structure
@@ -195,7 +198,7 @@ deskflow/
 ├── frontend/                 # Next.js app (App Router)
 ├── backend/                  # FastAPI app + Alembic migrations + tests
 ├── docs/                     # PRD, architecture, schema, API spec, workflows, plans…
-├── .github/workflows/        # ci.yml, deploy.yml
+├── .github/workflows/        # ci.yml, deploy.yml, scheduled.yml (cron)
 ├── docker-compose.yml        # Postgres (+ optional full stack)
 ├── README.md
 └── AGENTS.md                 # AI-agent project rules

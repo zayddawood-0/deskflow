@@ -2,9 +2,11 @@
 
 ## 1. Base conventions
 
-Base URL (local): `http://localhost:8000` · All business endpoints are prefixed with **`/api/v1`** · Health check: `GET /health` (root, unprefixed). Interactive docs: `/docs` (Swagger UI) and `/redoc`.
+Base URL (local): `http://localhost:8000` · **All endpoints are prefixed with `/api/v1`** (health included). Interactive docs: `/docs` (Swagger UI) and `/redoc`.
 
-Auth: `Authorization: Bearer <access_token>` on every endpoint except where **Public** is listed. Roles: `requester`, `agent`, `admin`. An **agent** inherits requester powers (agents may also create tickets), an **admin** inherits agent powers.
+Browser traffic is **same-origin**: the Next.js app serves `/api/v1/*` and proxies to the backend via `rewrites()` (`BACKEND_URL`) — the browser never calls the Render origin directly, so CORS is irrelevant for the app (it exists only for local direct-to-API testing).
+
+Auth: `Authorization: Bearer <access_token>` (in-memory, JS-set) on every endpoint except where **Public** is listed. The **refresh token travels in an httpOnly cookie** (`Path=/api/v1/auth`) that the browser attaches automatically to the auth endpoints below — clients never see or send it manually. Roles: `requester`, `agent`, `admin`. An **agent** inherits requester powers (agents may also create tickets), an **admin** inherits agent powers.
 
 All request/response bodies are `application/json`. All timestamps are ISO-8601 UTC with `Z`. List endpoints return the pagination envelope below; singleton/health endpoints return plain objects.
 
@@ -146,15 +148,15 @@ Request query params: `page` (≥1, default `1`), `page_size` (1–100, default 
 
 | Method | Path | Roles | Description |
 |---|---|---|---|
-| GET | `/health` | Public | Liveness + DB check |
+| GET | `/api/v1/health` | Public | Liveness + DB check (Render health check path; pinged every 15 min by `scheduled.yml`) |
 
-**`GET /health` → 200**
+**`GET /api/v1/health` → 200**
 
 ```json
 { "status": "ok", "database": "up", "version": "1.0.0" }
 ```
 
-`database` is `down` → 503 with the same shape (Render health check path = `/health`).
+`database` is `down` → 503 with the same shape.
 
 ---
 
@@ -163,8 +165,8 @@ Request query params: `page` (≥1, default `1`), `page_size` (1–100, default 
 | Method | Path | Roles | Description |
 |---|---|---|---|
 | POST | `/auth/register` | Public | Self-registration (always role `requester`) |
-| POST | `/auth/login` | Public | Email + password → token pair |
-| POST | `/auth/refresh` | Public | Rotate refresh token → new token pair |
+| POST | `/auth/login` | Public | Email + password → access token + user; sets refresh cookie |
+| POST | `/auth/refresh` | Public | Rotate the cookie's refresh token → new access token (+ rotated cookie) |
 | POST | `/auth/logout` | Any authenticated | Revoke a refresh token |
 | GET | `/auth/me` | Any authenticated | Current user |
 | POST | `/auth/change-password` | Any authenticated | Change password, revoke other sessions |
@@ -196,21 +198,22 @@ Response:
   "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "token_type": "bearer",
   "expires_in": 1800,
-  "refresh_token": "rt_9f3c1c...opaque",
   "user": { "id": "0f1d...f60", "email": "ana@acme.dev", "full_name": "Ana Silva", "role": "requester", "is_active": true, "created_at": "2026-10-17T08:00:00Z" }
 }
 ```
 
+Sets the refresh cookie: `Set-Cookie: refresh_token=rt_...; HttpOnly; SameSite=Lax; Path=/api/v1/auth; Max-Age=1209600` (+ `Secure` when `APP_ENV=production`). The token itself is **not** in the body.
 Errors: `401 UNAUTHORIZED` ("Invalid email or password."), `401` inactive account, `429 RATE_LIMITED`.
 
 ### POST `/auth/refresh` → 200
 
-Request: `{ "refresh_token": "rt_..." }` → same response shape as login (refresh token rotated; old one revoked).
-Errors: `401 UNAUTHORIZED` (unknown, expired or revoked token).
+Request body: empty (`{}`). The refresh token is read from the httpOnly cookie (the browser attaches it automatically because of `Path=/api/v1/auth`).
+Response: same shape as login (new access token + `expires_in` + user) and a **rotated** refresh cookie (`Set-Cookie` again; the old row is revoked).
+Errors: `401 UNAUTHORIZED` (cookie missing, unknown, expired or revoked).
 
 ### POST `/auth/logout` → 204
 
-Request: `{ "refresh_token": "rt_..." }`. Revokes that token (idempotent → `204` even if already revoked).
+Request body: empty (`{}`). Revokes the cookie's refresh token (idempotent → `204` even if already revoked) and clears the cookie: `Set-Cookie: refresh_token=; HttpOnly; SameSite=Lax; Path=/api/v1/auth; Max-Age=0`.
 
 ### GET `/auth/me` → 200
 
@@ -504,9 +507,13 @@ Scope: tickets with status ∈ {OPEN, IN_PROGRESS, ON_HOLD, REOPENED}; all four 
 
 ## 12. Internal (`/api/v1/internal`)
 
-### POST `/internal/sla-scan`
+### POST `/api/v1/internal/sla-scan`
 
-Header: `X-SLA-Scan-Secret: <SLA_SCAN_SECRET>` (constant-time compare; wrong/missing → `403 FORBIDDEN`). Optional for MVP — invoked manually or by an external scheduler; the same detection also runs on ticket reads/mutations.
+Header: `X-Internal-Token: <INTERNAL_TASK_TOKEN>` (constant-time compare against the backend env var; wrong/missing → `403 FORBIDDEN`).
+
+Invoked by `.github/workflows/scheduled.yml` every 15 minutes (cron + `workflow_dispatch`), which also pings `/api/v1/health` to keep the Render instance warm. The same detection additionally runs on ticket reads/mutations, so the scan only catches tickets nobody is looking at.
+
+**Idempotent by construction:** the breach flag is only flipped `false → true` (one audit row per ticket, ever); at-risk/breached notifications are skipped when a notification of the same `(user, type, ticket)` already exists — running the scan twice in a row changes nothing the second time.
 
 Response `200`:
 
@@ -514,7 +521,7 @@ Response `200`:
 { "scanned": 41, "newly_breached": 2, "at_risk": 3, "notifications_created": 4 }
 ```
 
-Side effects: persists `sla_breached = true` for newly breached tickets (audit `SLA_BREACHED`, `actor_id = NULL` = system) and creates `SLA_AT_RISK` / `SLA_BREACHED` notifications with the dedup rule from [DATABASE_SCHEMA §3.7](DATABASE_SCHEMA.md#37-notifications).
+Side effects: persists `sla_breached = true` for newly breached tickets (audit `SLA_BREACHED`, `actor_id = NULL` = system) and creates `SLA_AT_RISK` / `SLA_BREACHED` notifications per [WORKFLOWS §9](WORKFLOWS.md#9-notification-triggers).
 
 ---
 
@@ -538,4 +545,4 @@ Side effects: persists `sla_breached = true` for newly breached tickets (audit `
 | US-B5 audit | `GET /audit`, `GET /tickets/{id}/audit` |
 | US-B6 dashboard | `GET /dashboard/stats`, `/tickets-per-day`, `/sla-trend`, `/breakdown`, `/recent-tickets` |
 | US-B7 notifications | `GET /notifications`, `/unread-count`, `POST /notifications/{id}/read`, `/read-all` |
-| Health | `GET /health` |
+| Health | `GET /api/v1/health` |

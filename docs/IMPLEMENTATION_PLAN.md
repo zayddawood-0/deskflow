@@ -7,10 +7,10 @@ Time boxes assume ~half-day blocks; the order is chosen so there is always a **d
 ## Phase 1 — Scaffold & pipeline (first ~2 h)
 
 - [ ] 1.1 Create monorepo skeleton: `frontend/`, `backend/`, `docs/`, `.github/workflows/`, root `README.md`, `AGENTS.md`, `docker-compose.yml` (db service only), `.gitignore` (Python+Node+`.env*`)
-- [ ] 1.2 Backend skeleton: venv + `requirements.txt`/`requirements-dev.txt` pinned, `app/main.py` with `create_app()`, `GET /health` returning `{status, database, version}`, `app/core/config.py` (pydantic-settings), CORS, JSON logging + request-id middleware
+- [ ] 1.2 Backend skeleton: venv + `requirements.txt`/`requirements-dev.txt` pinned, `app/main.py` with `create_app()`, `GET /api/v1/health` returning `{status, database, version}`, `app/core/config.py` (pydantic-settings, incl. `internal_task_token`), CORS, JSON logging + request-id middleware
 - [ ] 1.3 Alembic initialized (`alembic.ini`, `env.py` wiring `Base.metadata`); empty DB migrated against Docker Postgres
 - [ ] 1.4 Frontend skeleton: `create-next-app` (TS strict, Tailwind, App Router, `src/`), Manrope via `next/font`, design tokens in `tailwind.config.ts` + `globals.css` (copy from DESIGN_SYSTEM §1), base UI primitives: `Button`, `IconButton`, `Card`, `Input`, `Skeleton`
-- [ ] 1.5 `frontend/src/lib/api-client.ts` (base URL, Bearer, refresh-once, `ApiError`) + `types/api.ts` envelopes + `constants.ts` enums
+- [ ] 1.5 `frontend/src/lib/api-client.ts` (same-origin `/api/v1` base via rewrites, Bearer from memory, refresh-once w/ cookie, `ApiError`) + `types/api.ts` envelopes + `constants.ts` enums + `next.config.ts` rewrite to `BACKEND_URL`
 - [ ] 1.6 CI: `.github/workflows/ci.yml` as in DEPLOYMENT §5.1; push branch, confirm **green** (health test included: `test_health.py`)
 - [ ] 1.7 `docker compose up --build` sanity check (all three services); revert to db-only dev mode
 
@@ -19,9 +19,9 @@ Time boxes assume ~half-day blocks; the order is chosen so there is always a **d
 - [ ] 2.1 Models for ALL tables + enums (`app/models/*`) mirroring DATABASE_SCHEMA; initial Alembic revision `0001_initial` (tables, indexes, audit immutability trigger, `sla_policies` + counter seed rows) — one revision for the whole schema
 - [ ] 2.2 `app/db/session.py`, `get_db`, transaction discipline; `tests/conftest.py` (test DB + rollback fixtures + `factories.py`)
 - [ ] 2.3 `core/security.py` (argon2, JWT create/decode, refresh-token opaque + hash) + `core/errors.py` (AppError hierarchy + handlers producing the error envelope) + `core/rate_limit.py` (slowapi on login/register)
-- [ ] 2.4 `auth_service` + `routers/auth.py`: register, login, refresh (rotation), logout, me, change-password — with `test_auth.py` passing
+- [ ] 2.4 `auth_service` + `routers/auth.py`: register, login (httpOnly refresh cookie), refresh (rotation, cookie), logout (clear cookie), me, change-password — with `test_auth.py` passing
 - [ ] 2.5 `users` endpoints (admin) + `require_roles` dep + `routers/users.py` — `test_rbac.py` core cases green (403 matrix, self-demotion 409, deactivated token death)
-- [ ] 2.6 Frontend auth: `AuthProvider` (memory access + localStorage refresh), `use-auth`, `/login`, `/register`, `/settings` (profile + change password), `middleware.ts` redirects, `(app)/layout.tsx` shell with Navbar/IconRail placeholders
+- [ ] 2.6 Frontend auth: `AuthProvider` (in-memory access + silent cookie refresh on mount), `use-auth`, `/login`, `/register`, `/settings` (profile + change password), `RoleGuard`, `(app)/layout.tsx` shell with Navbar/IconRail placeholders
 - [ ] 2.7 Categories + SLA-policy endpoints (read for all, write admin) + seed rows visible via API; `test_categories_and_sla.py` minimal set
 
 ## Phase 3 — Tickets, workflow, assignment, audit (~4 h)
@@ -39,7 +39,7 @@ Time boxes assume ~half-day blocks; the order is chosen so there is always a **d
 - [ ] 4.2 Wire `sla_state` into every ticket serialization (list/detail/recent); `sla_state` list filter + `due_at` sort
 - [ ] 4.3 `comment_service` + comments endpoints with visibility rules and first-response effects — `test_comments.py` green (internal notes invisible to requesters)
 - [ ] 4.4 `notification_service` + notifications endpoints (`list`, `unread-count`, `read`, `read-all`) — `test_notifications.py` green
-- [ ] 4.5 `internal/sla-scan` endpoint + `test_sla_scan` case
+- [ ] 4.5 `internal/sla-scan` endpoint (`X-Internal-Token`) + `test_sla_scan` incl. idempotency case
 - [ ] 4.6 Frontend: comment list/form with Public/Internal toggle, `SlaBadge` + live countdown (+ "Paused"), `NotificationBell` (poll 30 s, dropdown, mark-all), ticket status buttons driven by the transition matrix constants
 
 ## Phase 5 — Frontend pages complete (~4 h)
@@ -53,10 +53,11 @@ Time boxes assume ~half-day blocks; the order is chosen so there is always a **d
 ## Phase 6 — Seed, deploy, verify (~3 h)
 
 - [ ] 6.1 `app/db.seed` module: 1+3+5 users, 6 categories, 4 SLA policies, ~40 tickets across 45 days with comments/notes/audit/notifications; ≥3 breached, ≥3 at-risk, several paused; idempotent; demo credentials table in README verified
-- [ ] 6.2 GitHub repo: push, enable Actions; create Neon DB + Render service + Vercel project per DEPLOYMENT §2–§4; add all secrets
+- [ ] 6.2 GitHub repo: push, enable Actions; create Neon DB + Render service + Vercel project per DEPLOYMENT §2–§4; add all secrets (incl. `INTERNAL_TASK_TOKEN` as **both** a GitHub secret and a Render env var, identical values)
 - [ ] 6.3 Wire `ci.yml` + `deploy.yml` (DEPLOYMENT §5); push to `main`; watch migrate → Render → Vercel go green
-- [ ] 6.4 Run seed against production DB; execute the full POST-DEPLOY SMOKE TEST (DEPLOYMENT §8) end-to-end in the browser
-- [ ] 6.5 README: real live URLs, screenshots from production, badge links; demo credentials confirmed
+- [ ] 6.4 Wire `scheduled.yml` (DEPLOYMENT §5.3: health keep-warm ping + SLA scan every 15 min); verify the first cron/manual run goes green and `/api/v1/health` returns `database: "up"`
+- [ ] 6.5 Run seed against production DB; execute the full POST-DEPLOY SMOKE TEST (DEPLOYMENT §8) end-to-end in the browser
+- [ ] 6.6 README: real live URLs, screenshots from production, badge links; demo credentials confirmed
 
 ## Phase 7 — Polish & demo (remaining time)
 

@@ -12,12 +12,12 @@ Two env files, both git-ignored; the committed templates are `backend/.env.examp
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Access-token lifetime in minutes | no (`30`) | `30` | `30` |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh-token lifetime in days | no (`14`) | `14` | `14` |
 | `DATABASE_URL` | SQLAlchemy URL `postgresql+psycopg2://user:pass@host:port/db` (+`?sslmode=require` remote) | **yes** | `postgresql+psycopg2://deskflow:deskflow@localhost:5432/deskflow` | Neon URL (normalized; `postgres://` accepted) |
-| `CORS_ORIGINS` | Comma-separated allowed browser origins | no (`http://localhost:3000`) | `http://localhost:3000` | `https://deskflow-web.vercel.app` |
+| `CORS_ORIGINS` | Comma-separated allowed origins — **only for direct-to-API testing** (the browser app goes same-origin through the Next rewrite proxy; prod needs none) | no (`http://localhost:3000`) | `http://localhost:3000` | *(empty)* |
 | `SLA_AT_RISK_THRESHOLD` | Fraction of an SLA target that means `AT_RISK` | no (`0.75`) | `0.75` | `0.75` |
 | `REOPEN_WINDOW_DAYS` | Days after `CLOSED` during which `CLOSED→REOPENED` is allowed | no (`7`) | `7` | `7` |
-| `SLA_SCAN_SECRET` | Shared secret required by `POST /api/v1/internal/sla-scan` (`X-SLA-Scan-Secret`) | no (default local literal) | `local-scan-secret` | random string |
+| `INTERNAL_TASK_TOKEN` | Shared token required by `POST /api/v1/internal/sla-scan` (`X-Internal-Token` header) — must equal the GitHub secret of the same name used by `scheduled.yml` | no (default local literal) | `local-internal-token` | random string (Render env **and** GitHub secret, identical values) |
 | `LOG_LEVEL` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` | no (`INFO`) | `DEBUG` | `INFO` |
-| `APP_VERSION` | Reported by `/health` (optional override of the baked default `1.0.0`) | no | `1.0.0` | `1.0.0` |
+| `APP_VERSION` | Reported by `/api/v1/health` (optional override of the baked default `1.0.0`) | no | `1.0.0` | `1.0.0` |
 
 Notes:
 - `session.py` normalizes `DATABASE_URL`: `postgres://` → `postgresql+psycopg2://`, and adds `sslmode=require` when the host is not `localhost` (covers Neon + Render).
@@ -40,7 +40,7 @@ DATABASE_URL=postgresql+psycopg2://deskflow:deskflow@localhost:5432/deskflow
 CORS_ORIGINS=http://localhost:3000
 SLA_AT_RISK_THRESHOLD=0.75
 REOPEN_WINDOW_DAYS=7
-SLA_SCAN_SECRET=local-scan-secret
+INTERNAL_TASK_TOKEN=local-internal-token
 LOG_LEVEL=DEBUG
 ```
 
@@ -48,18 +48,20 @@ LOG_LEVEL=DEBUG
 
 | Name | Purpose | Required | Local example | Production value |
 |---|---|---|---|---|
-| `NEXT_PUBLIC_API_URL` | Base URL of the API **including** the `/api/v1` prefix | **yes** | `http://localhost:8000/api/v1` | `https://deskflow-api.onrender.com/api/v1` |
+| `BACKEND_URL` | **Server-side** origin of the FastAPI backend, consumed by `next.config.ts` `rewrites()` (`/api/:path*` → `${BACKEND_URL}/api/:path*`). Never exposed to the browser (`NEXT_PUBLIC_`-free) | **yes** | `http://localhost:8000` | `https://deskflow-api.onrender.com` |
 | `NEXT_PUBLIC_APP_NAME` | Display name in the navbar/toasts | no (`DeskFlow`) | `DeskFlow` | `DeskFlow` |
 
 Rules:
-- Only `NEXT_PUBLIC_*` vars reach the browser bundle — never put tokens or secrets there.
-- Set in Vercel → Project → Settings → Environment Variables (Production/Preview/Development all need a value; Preview can point at the same Render API).
+- The browser only ever requests **same-origin `/api/v1/*`**; the rewrite proxy performs the Vercel→Render hop server-side, which is why no CORS configuration and no cross-site cookie handling are needed.
+- `BACKEND_URL` must be an **origin only** (no trailing `/api/v1`).
+- Set `BACKEND_URL` in Vercel → Project → Settings → Environment Variables (Production/Preview/Development); `vercel pull` makes it available to `next.config.ts` during the CI build.
 
 ### `frontend/.env.example` (committed template; copy to `.env.local`)
 
 ```dotenv
 # DeskFlow frontend — copy to .env.local
-NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+# Server-side API origin consumed by the /api/:path* rewrite (no trailing slash, no /api/v1)
+BACKEND_URL=http://localhost:8000
 NEXT_PUBLIC_APP_NAME=DeskFlow
 ```
 
@@ -68,9 +70,9 @@ NEXT_PUBLIC_APP_NAME=DeskFlow
 | Context | Backend vars | Frontend vars |
 |---|---|---|
 | Local dev | `backend/.env` (from `.env.example`) | `frontend/.env.local` (from `.env.example`) |
-| Local Docker Compose | inline in `docker-compose.yml` `environment:` | inline `NEXT_PUBLIC_API_URL` |
-| CI (`ci.yml`) | inline job `env:` (test DB + dummy secret) | inline `NEXT_PUBLIC_API_URL` (prod URL — build-time only) |
-| Production | Render → Environment panel (`APP_ENV`, `SECRET_KEY`, `DATABASE_URL`, `CORS_ORIGINS`, `SLA_SCAN_SECRET`, `LOG_LEVEL`, thresholds) | Vercel → Project env vars (`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_APP_NAME`) |
-| CD pipeline | GitHub Actions secrets (`NEON_DATABASE_URL`, `RENDER_DEPLOY_HOOK_URL`, `VERCEL_*`) — pipeline-only, never app runtime | same |
+| Local Docker Compose | inline in `docker-compose.yml` `environment:` | inline `BACKEND_URL: http://backend:8000` (compose service name) |
+| CI (`ci.yml`) | inline job `env:` (test DB + dummy secret/token) | none — `next.config.ts` falls back to `http://localhost:8000` when `BACKEND_URL` is unset (build only needs the rewrite table to exist) |
+| Production | Render → Environment panel (`APP_ENV`, `SECRET_KEY`, `DATABASE_URL`, `INTERNAL_TASK_TOKEN`, thresholds; `CORS_ORIGINS` optional/empty) | Vercel → Project env vars (`BACKEND_URL`, `NEXT_PUBLIC_APP_NAME`) |
+| CD pipeline | GitHub Actions secrets (`NEON_DATABASE_URL`, `RENDER_DEPLOY_HOOK_URL`, `INTERNAL_TASK_TOKEN`, `VERCEL_*`) — pipeline-only, never app runtime | same |
 
 Setup steps for the production services: [DEPLOYMENT §2–§4](DEPLOYMENT.md#2-neon-production-database).

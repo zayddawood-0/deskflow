@@ -1,0 +1,14 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI's idiomatic dependency-injection pattern uses Depends() in defaults.
+"app/**" = ["B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

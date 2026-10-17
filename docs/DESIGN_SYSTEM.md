@@ -205,7 +205,7 @@ Pulse blocks (`animate-pulse bg-surface-muted rounded-xl`) shaped like the real 
 
 - **Navbar** (all app pages): left = DeskFlow logo mark (orange rounded square with "D" + wordmark), center = TabNav (always: Dashboard¹, Tickets, Settings; admin adds: Users, Audit — tabs the role cannot use are not rendered²), right = mail IconButton, NotificationBell IconButton, Avatar with dropdown (role badge, Settings, Log out).
   ¹ Dashboard visible to `agent`/`admin` only — requesters get the Tickets tab as their landing tab.
-  ² Route access itself is still enforced by `middleware.ts` + backend RBAC.
+  ² Route access itself is still enforced client-side (`AuthProvider` bootstrap + `RoleGuard`) + backend RBAC.
 - **Greeting header** on dashboard/list pages: `Welcome back, {first_name}!` + muted subtitle.
 - **Primary CTA:** "New ticket" primary Button, top-right of Tickets pages.
 - **Secondary buttons:** "Filters" and "Export"(stretch) as white pills with icons.

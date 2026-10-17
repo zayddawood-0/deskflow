@@ -3,8 +3,9 @@
 | | |
 |---|---|
 | Framework | Next.js (App Router) + TypeScript strict, Tailwind, components per [DESIGN_SYSTEM](DESIGN_SYSTEM.md) |
-| Data | TanStack Query via `src/hooks/*`; HTTP only through `src/lib/api-client.ts` |
+| Data | TanStack Query via `src/hooks/*`; HTTP only through `src/lib/api-client.ts`; all calls **same-origin** `/api/v1/*` (Next `rewrites()` proxy → `BACKEND_URL`) |
 | Forms | React Hook Form + Zod (`src/schemas/*`) |
+| Auth | Access token in memory; refresh token in an httpOnly cookie owned by the backend (`Path=/api/v1/auth`) — see [AUTH_AND_SECURITY §3](AUTH_AND_SECURITY.md#3-token-storage-frontend) |
 
 ## 1. Sitemap & role access
 
@@ -23,18 +24,17 @@
 | `/audit` | ✗ | ✗ | ✓ | Global audit log |
 | `/settings` | ✓ | ✓ | ✓ | Profile + change password |
 
-Enforcement: `src/middleware.ts` redirects unauthenticated users to `/login` via a `deskflow_session` marker cookie (auth UX only); role-based redirects and hidden controls are client-side (`RoleGuard`); the backend RBAC is the only real security boundary.
+Enforcement: route protection is **client-side** — `AuthProvider` performs one silent `POST /api/v1/auth/refresh` on mount (the path-scoped httpOnly cookie rides along automatically); unauthenticated users are redirected to `/login` once it resolves, and `RoleGuard` hides/redirects wrong-role routes. The backend RBAC is the only real security boundary. (`middleware.ts` is intentionally not used for auth: the refresh cookie's `Path=/api/v1/auth` means page requests never carry it.)
 
 ## 2. Folder structure
 
 ```
 frontend/
-├── .env.example                    # NEXT_PUBLIC_API_URL, NEXT_PUBLIC_APP_NAME
-├── next.config.ts
+├── .env.example                    # BACKEND_URL, NEXT_PUBLIC_APP_NAME
+├── next.config.ts                  # rewrites(): /api/:path* → ${BACKEND_URL}/api/:path*
 ├── tailwind.config.ts              # tokens from DESIGN_SYSTEM §1.2
 ├── tsconfig.json                   # strict: true
 ├── src/
-│   ├── middleware.ts               # auth/role redirects
 │   ├── app/
 │   │   ├── layout.tsx              # Manrope via next/font, Toaster, AuthProvider, QueryProvider
 │   │   ├── globals.css             # CSS variables (DESIGN_SYSTEM §1.1)
@@ -75,7 +75,7 @@ frontend/
 │   │   └── use-audit.ts
 │   ├── lib/
 │   │   ├── api-client.ts           # fetch wrapper: base URL, Bearer, refresh-on-401, ApiError
-│   │   ├── auth.ts                 # token memory store + localStorage refresh helpers
+│   │   ├── auth.ts                 # in-memory access-token store (single source for api-client)
 │   │   ├── constants.ts            # STATUSES, PRIORITIES, ROLES, SLA_STATES, STATUS_COLORS…
 │   │   ├── utils.ts                # cn(), formatDate, formatRelative, formatCountdown
 │   │   └── guards.tsx              # RoleGuard component
@@ -95,12 +95,15 @@ export class ApiError extends Error {
               public status: number, public details?: { field: string; issue: string }[]) { super(message); }
 }
 export async function api<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T>
-// - base = process.env.NEXT_PUBLIC_API_URL
+// - base = "/api/v1"  (same-origin; next.config.ts rewrites proxy to ${BACKEND_URL})
 // - attaches Authorization from in-memory access token when present
+// - cookies ride along automatically (same-origin) — the httpOnly refresh cookie is
+//   only ever sent to /api/v1/auth/* (Path-scoped by the backend); JS never reads it
 // - init.json → JSON.stringify + Content-Type header
 // - !res.ok → parse {"error":{code,message,details}} → throw ApiError
-// - on 401 code UNAUTHORIZED once: POST /auth/refresh (localStorage), store new pair, retry once
-// - after failed refresh: clear tokens, dispatch auth:logout event → AuthProvider redirects /login
+// - on 401 code UNAUTHORIZED once: POST /api/v1/auth/refresh (empty body, cookie auth),
+//   store new access token, retry original request once (single-flight across concurrent 401s)
+// - after failed refresh: clear in-memory token, dispatch auth:logout event → AuthProvider redirects /login
 ```
 
 ### Hook pattern (every server interaction)
@@ -154,7 +157,7 @@ Rules: components never import `api-client` directly — always a hook; every mu
 - **Fetches (parallel):** `/dashboard/stats`, `/dashboard/tickets-per-day?days=30`, `/dashboard/sla-trend?days=30`, `/dashboard/breakdown`, `/dashboard/recent-tickets?limit=8`.
 - **States:** per-widget skeletons (`animate-pulse` cards/rows); error → inline Card "Couldn't load the dashboard" + Retry button (toaster only for unexpected failures); Render cold start → the api-client surfaces a timeout error, page shows "Waking up the server… retrying" and auto-retries once after 5 s.
 - **Interactions:** clicking a KPI card navigates to `/tickets?status=…` (or `?sla_state=BREACHED`); clicking a recent row opens the ticket; breakdown segments link to `/tickets?priority=…` / `?category_id=…`.
-- **Requester hitting this route:** redirected to `/tickets` by middleware (and `RoleGuard`).
+- **Requester hitting this route:** redirected to `/tickets` by `RoleGuard` (once `AuthProvider.user` resolves).
 
 ### 4.4 `/tickets` — `(app)` · all roles
 
@@ -219,8 +222,8 @@ Rules: components never import `api-client` directly — always a hook; every mu
 
 | Concern | Behavior |
 |---|---|
-| Auth bootstrap | `AuthProvider` on mount: read refresh token from localStorage → `POST /auth/refresh` to hydrate the access token + user (silent); loading → full-page skeleton; failure → treat as logged out |
-| Route protection | `AuthProvider` writes a non-HttpOnly marker cookie `deskflow_session=1` on login (removed on logout) — `middleware.ts` reads it (edge runtime cannot see `localStorage`) for instant redirects, and `RoleGuard` renders `null` + redirect while `useAuth().user` resolves; the backend re-checks everything |
+| Auth bootstrap | `AuthProvider` on mount: `POST /api/v1/auth/refresh` (empty body; browser attaches the httpOnly cookie) to hydrate the access token + user (silent); loading → full-page skeleton; failure → treat as logged out; login sets the cookie via `Set-Cookie` (JS never touches it); logout = `POST /api/v1/auth/logout` + clear memory |
+| Route protection | Client-side only: while `AuthProvider.user` is unknown, protected pages render a skeleton; unauthenticated → `/login`; wrong role → `RoleGuard` redirects to `/tickets`. Backend re-checks everything |
 | Polling | `unread-count` every 30 s (paused when tab hidden via `enabled: !document.hidden` + visibility listener); no other polling in MVP |
 | Dates | All rendering via `formatDate` (UTC-safe, e.g. "Oct 17, 09:23") and `formatRelative` ("2 h ago"); server data untouched |
 | Errors | `ApiError.code` → toast message map in `lib/utils.ts`; field errors → RHF `setError`; 401 post-refresh → redirect |

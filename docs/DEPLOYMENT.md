@@ -47,7 +47,7 @@ services:
     container_name: deskflow-web
     depends_on: [backend]
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      BACKEND_URL: http://backend:8000   # compose-internal origin for the /api/:path* rewrite
     ports:
       - "3000:3000"
 
@@ -79,7 +79,7 @@ Dockerfiles: `backend/Dockerfile` (`python:3.12-slim`, `pip install -r requireme
    | Runtime | Python |
    | Build Command | `pip install -r requirements.txt` |
    | Start Command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
-   | Health Check Path | `/health` |
+   | Health Check Path | `/api/v1/health` |
    | Instance Type | Free |
 3. Environment (manual, not in repo):
    | Key | Value |
@@ -87,24 +87,29 @@ Dockerfiles: `backend/Dockerfile` (`python:3.12-slim`, `pip install -r requireme
    | `APP_ENV` | `production` |
    | `SECRET_KEY` | long random string (Generate button) |
    | `DATABASE_URL` | same Neon string as §2 |
-   | `CORS_ORIGINS` | `https://deskflow-web.vercel.app` |
-   | `SLA_SCAN_SECRET` | random string (optional feature) |
+   | `INTERNAL_TASK_TOKEN` | long random string — **must match the GitHub secret of the same name** (used by `scheduled.yml` → `X-Internal-Token`) |
    | `SLA_AT_RISK_THRESHOLD` | `0.75` |
    | `REOPEN_WINDOW_DAYS` | `7` |
    | `LOG_LEVEL` | `INFO` |
+   | `CORS_ORIGINS` | *(leave empty — the browser talks to the API only through the Vercel rewrite proxy)* |
 4. Copy the Render **Deploy Hook** URL (Service → Deploys → Deploy hooks → GitHub) into GitHub secret **`RENDER_DEPLOY_HOOK_URL`**. A `POST` to it triggers a fresh build+deploy — exactly what `deploy.yml` does after migrations succeed.
 
 ## 4. Vercel (frontend)
 
 1. `cd frontend && npx vercel link` locally (creates the project), then `npx vercel` for a first manual prod deploy if desired.
-2. Project → Settings → Environment Variables: `NEXT_PUBLIC_API_URL = https://deskflow-api.onrender.com/api/v1` (Production + Preview + Development).
+2. Project → Settings → Environment Variables:
+   | Key | Value |
+   |---|---|
+   | `BACKEND_URL` | `https://deskflow-api.onrender.com` (server-side rewrite destination; **no** trailing slash, no `/api/v1`) |
+   | `NEXT_PUBLIC_APP_NAME` | `DeskFlow` |
+   Set for Production + Preview + Development. The browser never calls the Render origin directly — `next.config.ts` rewrites `/api/:path*` → `${BACKEND_URL}/api/:path*` on the server.
 3. GitHub secrets:
    | Secret | How to obtain |
    |---|---|
    | `VERCEL_TOKEN` | vercel.com → Account Settings → Tokens → Create (scope: full account or the project) |
    | `VERCEL_ORG_ID` | `.vercel/project.json` after `vercel link`, or Team Settings → General |
    | `VERCEL_PROJECT_ID` | same file / Project Settings → General |
-4. Domain: the generated `*.vercel.app` domain is enough; it is also the value of `CORS_ORIGINS` on Render.
+4. Domain: the generated `*.vercel.app` domain is enough — no CORS wiring needed on Render (all browser traffic arrives same-origin through the rewrite proxy).
 
 ## 5. GitHub Actions workflows
 
@@ -160,8 +165,6 @@ jobs:
     defaults:
       run:
         working-directory: frontend
-    env:
-      NEXT_PUBLIC_API_URL: https://deskflow-api.onrender.com/api/v1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -226,7 +229,7 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      NEXT_PUBLIC_API_URL: https://deskflow-api.onrender.com/api/v1
+      BACKEND_URL: https://deskflow-api.onrender.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -243,6 +246,46 @@ jobs:
 Ordering guarantees: **migrations before code** (Render's new image starts against an already-migrated DB; FastAPI is backward-compatible with the previous schema for one release because migrations are additive within a release). The frontend deploy is independent of the Render build duration.
 
 > Branch-protection tip: require the CI workflow green before merging to `main` (repo Settings → Branches → `main` → Require status checks).
+
+### 5.3 `.github/workflows/scheduled.yml` (cron every 15 min + manual)
+
+Keeps the Render free instance awake (it sleeps after ~15 min idle) and runs the SLA scan so breaches are flagged and notified even when nobody has the app open. The scan is idempotent ([API_SPEC §12](API_SPEC.md#12-internal-apiv1internal)) — double runs never duplicate audit rows or notifications.
+
+```yaml
+name: Scheduled
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  keep-warm:
+    name: Ping API health (keep Render warm)
+    runs-on: ubuntu-latest
+    steps:
+      - name: GET /api/v1/health
+        run: |
+          curl --fail --silent --show-error --max-time 120 \
+            "https://deskflow-api.onrender.com/api/v1/health"
+
+  sla-scan:
+    name: SLA breach / at-risk scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /api/v1/internal/sla-scan
+        run: |
+          curl --fail --silent --show-error --max-time 120 \
+            -X POST \
+            -H "X-Internal-Token: ${{ secrets.INTERNAL_TASK_TOKEN }}" \
+            "https://deskflow-api.onrender.com/api/v1/internal/sla-scan"
+```
+
+Notes:
+- `INTERNAL_TASK_TOKEN` (GitHub secret) must equal the Render env var of the same name — the backend compares the `X-Internal-Token` header against it with a constant-time compare.
+- A red `keep-warm` run means the API was unreachable for 2 minutes (usually a cold start exceeding the timeout or an outage); a red `sla-scan` run means a bad/missing token or a server error — check the run's curl output.
+- Cron on the free tier of GitHub Actions can be delayed by several minutes under load; 15-minute granularity is a best-effort wake-up, not a hard guarantee.
+- Both jobs are plain `curl` — no checkout needed, they run in seconds.
 
 ## 6. Migration strategy
 
@@ -266,13 +309,13 @@ Ordering guarantees: **migrations before code** (Render's new image starts again
 | Both | revert commit on `main` and push; CI/CD redoes the pipeline in the right order |
 | `SECRET_KEY` rotated accidentally | all access tokens invalidate; users re-login (refresh tokens keep working only if their hash lookup still passes — they do; only JWTs die). Communicate as a forced re-login |
 
-Free-tier caveat: Render free services are deleted after 90 days of inactivity — keep the service awake (cron ping on `/health`, or accept re-creation).
+Free-tier caveat: Render free services are deleted after 90 days of inactivity — the `scheduled.yml` cron ping on `/api/v1/health` every 15 min keeps the instance alive (and awake, mostly) so the service is never idle enough to be deleted.
 
 ## 8. Post-deploy smoke test
 
 Run after every production deploy (also the manual UI regression checklist):
 
-1. `curl https://deskflow-api.onrender.com/health` → `{"status":"ok","database":"up"}` (first call may take 30–60 s cold).
+1. `curl https://deskflow-api.onrender.com/api/v1/health` → `{"status":"ok","database":"up","version":"1.0.0"}` (first call may take 30–60 s cold).
 2. Login as `agent1@deskflow.dev` → dashboard loads, KPI numbers present, charts render.
 3. Login as `requester1@deskflow.dev` → `/tickets` lists only own tickets; create a ticket with a `CRITICAL` priority → due dates visible, countdown ticking.
 4. Login as agent → new ticket appears (auto-assigned), self-assign a second one, add an internal note, put a third on hold → "Paused" state shown.
@@ -280,11 +323,11 @@ Run after every production deploy (also the manual UI regression checklist):
 6. Requester reopens the resolved ticket; admin sees both events in `/audit` filtered by that ticket.
 7. Bell shows unread items; mark-all-read works.
 8. `/admin/sla` save works (revert the change after checking).
-9. Console free of errors; mobile width spot-check; no `NEXT_PUBLIC_*` leaks beyond the API URL.
+9. Console free of errors; mobile width spot-check; Network tab shows all API calls going to the same origin (`/api/v1/*`, i.e. the Vercel domain — never direct to Render).
 
 ## 9. Render free-tier cold starts (and how the frontend handles them)
 
-- After ~15 min without traffic, Render puts the free service to sleep. The first request takes **30–60 s** while the container and DB pool boot; `/health` is the wake-up call.
+- After ~15 min without traffic, Render puts the free service to sleep. The first request takes **30–60 s** while the container and DB pool boot; `/api/v1/health` is the wake-up call (also hit by `scheduled.yml` every 15 min, so the instance rarely sleeps while the cron is green).
 - Frontend mitigations (implemented in `lib/api-client.ts` + dashboard page):
   - 15 s request timeout (AbortController) → on timeout the UI shows a **"Waking up the server…"** skeleton with an automatic retry after 5 s (one retry, then a friendly error Card with a manual Retry button).
   - All list/detail pages use skeletons (no blank flash).
@@ -297,8 +340,9 @@ Run after every production deploy (also the manual UI regression checklist):
 |---|---|---|
 | `NEON_DATABASE_URL` | `deploy.yml → migrate` | Alembic against production DB |
 | `RENDER_DEPLOY_HOOK_URL` | `deploy.yml → deploy-backend` | Triggers Render rebuild |
+| `INTERNAL_TASK_TOKEN` | `scheduled.yml → sla-scan` | `X-Internal-Token` header for `/api/v1/internal/sla-scan`; **must equal the Render env var of the same name** |
 | `VERCEL_TOKEN` | `deploy.yml → deploy-frontend` | Vercel CLI auth |
 | `VERCEL_ORG_ID` | `deploy.yml → deploy-frontend` | CLI scope |
 | `VERCEL_PROJECT_ID` | `deploy.yml → deploy-frontend` | CLI target project |
 
-Runtime secrets live only in Render's env panel (never in GitHub): `SECRET_KEY`, `DATABASE_URL`, `CORS_ORIGINS`, `SLA_SCAN_SECRET`. How to create/rotate each: [AUTH_AND_SECURITY §9](AUTH_AND_SECURITY.md#9-secrets-handling).
+Runtime secrets live only in Render's env panel (never in GitHub): `SECRET_KEY`, `DATABASE_URL`, `INTERNAL_TASK_TOKEN` (the shared one — also a GitHub secret), thresholds, `LOG_LEVEL`. How to create/rotate each: [AUTH_AND_SECURITY §9](AUTH_AND_SECURITY.md#9-secrets-handling).

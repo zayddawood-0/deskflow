@@ -62,14 +62,14 @@ Roles: `requester`, `agent`, `admin`. Statuses: `OPEN | IN_PROGRESS | ON_HOLD | 
 - AC1.3: Frontend page `/register`; link to `/login` for existing users.
 
 **US-A2 — Login.** As a registered user, I can log in with email + password.
-- AC2.1: `POST /api/v1/auth/login` returns `{access_token, token_type: "bearer", expires_in, refresh_token, user}`.
+- AC2.1: `POST /api/v1/auth/login` returns `{access_token, token_type: "bearer", expires_in, user}` and sets the refresh token as an httpOnly cookie (`Path=/api/v1/auth`) — the refresh token is never in the response body.
 - AC2.2: Wrong credentials → `401 UNAUTHORIZED` with a generic message ("Invalid email or password") that does not reveal whether the email exists.
 - AC2.3: Inactive user (`is_active=false`) → `401`.
 - AC2.4: Login is rate-limited to 5 attempts/minute per IP → `429 RATE_LIMITED`.
 - AC2.5: Frontend page `/login`; on success redirect to `/dashboard` (agent/admin) or `/tickets` (requester).
 
 **US-A3 — Session.** As a logged-in user, my session survives page reloads and expires safely.
-- AC3.1: Access token (30 min) is held in memory; refresh token (14 days) is stored in `localStorage`; on a `401` the client attempts one silent refresh via `POST /api/v1/auth/refresh` and retries, otherwise redirects to `/login`.
+- AC3.1: Access token (30 min) is held in memory; the refresh token (14 days) is an httpOnly `SameSite=Lax` cookie scoped to `Path=/api/v1/auth` (set/cleared by the backend, invisible to JS; the browser talks to the API only same-origin through the Next.js rewrite proxy); on a `401` the client attempts one silent refresh via `POST /api/v1/auth/refresh` (empty body, cookie rides along) and retries, otherwise redirects to `/login`.
 - AC3.2: Refresh rotates the refresh token (the old one is revoked) and issues a new pair; a revoked or expired refresh token → `401`.
 - AC3.3: `POST /api/v1/auth/logout` revokes the presented refresh token → `204`.
 - AC3.4: Token storage tradeoff is documented in [AUTH_AND_SECURITY §3](AUTH_AND_SECURITY.md#3-token-storage-frontend).

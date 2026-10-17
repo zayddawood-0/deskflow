@@ -25,19 +25,19 @@ npm run lint && npm run typecheck && npm run build
 ## 2. Test cases — backend
 
 ### 2.1 `test_health.py`
-- `test_health_returns_ok_and_db_up` → 200 `{status, database: "up"}`.
+- `test_health_returns_ok_and_db_up` → 200 `{status, database: "up", version}` on `GET /api/v1/health`.
 
 ### 2.2 `test_auth.py`
 - `test_register_creates_requester_and_returns_user` — role always `requester`, no token in response.
 - `test_register_duplicate_email_conflicts` → 409 `CONFLICT`.
 - `test_register_weak_password_rejected` (missing digit/short) → 422 with field details.
-- `test_login_success_returns_token_pair` — `expires_in == 1800`, refresh token round-trips.
+- `test_login_success_returns_access_and_sets_refresh_cookie` — body has `expires_in == 1800` and **no** `refresh_token` field; `Set-Cookie` carries `refresh_token` with `HttpOnly`, `SameSite=Lax`, `Path=/api/v1/auth`.
 - `test_login_wrong_password_generic_401` — message identical to unknown-email case (no enumeration).
 - `test_login_inactive_user_rejected` → 401.
 - `test_login_rate_limited_after_5_attempts` → 429 `RATE_LIMITED` on the 6th.
-- `test_refresh_rotates_token_and_revokes_old` — old refresh fails after use, new one works.
-- `test_refresh_rejected_when_revoked_or_expired` → 401.
-- `test_logout_revokes_refresh_token` → 204 then refresh → 401.
+- `test_refresh_rotates_token_and_revokes_old` — call refresh with the cookie from login → new access token + rotated `Set-Cookie`; sending the **old** cookie value again → 401.
+- `test_refresh_rejected_when_missing_or_revoked_or_expired` → 401 (no cookie at all, or revoked/expired value).
+- `test_logout_revokes_refresh_token_and_clears_cookie` → 204 with expired `Set-Cookie`, then refresh with that value → 401; logout again → still 204 (idempotent).
 - `test_change_password_requires_current_and_revokes_other_sessions`.
 - `test_me_requires_valid_token` (missing / garbage / expired) → 401.
 
@@ -81,9 +81,10 @@ npm run lint && npm run typecheck && npm run build
 - `test_paused_ticket_freezes_elapsed` — while `paused_at` set, moving `now` forward does not change the state.
 - `test_resume_shifts_and_then_breach_math` — worked Example B from [WORKFLOWS §5.3](WORKFLOWS.md#5-sla-calculation-algorithm).
 - `test_breach_persists_flag_audit_and_notifications_once` — second read does not duplicate audit/notifications.
-- `test_at_risk_notification_deduped`.
+- `test_at_risk_notification_deduped` — second trigger with the same (user, type, ticket) creates nothing, even after the first is marked read.
 - `test_resolved_on_time_vs_late` — `resolved_at` compared against shifted `resolution_due_at`.
-- `test_sla_scan_endpoint_scans_all_open_tickets` — header secret ok / wrong → 403; returns counts.
+- `test_sla_scan_endpoint_scans_all_open_tickets` — `X-Internal-Token` correct → 200 with counts; wrong/missing → 403.
+- `test_sla_scan_idempotent` — running the scan twice in a row: second response `newly_breached == 0`, notification/audit counts unchanged.
 
 ### 2.7 `test_assignment.py`
 - `test_auto_assign_picks_least_loaded_agent` — agent A has 2 open, B has 1, C has 0 → C; `auto_assigned=True`, audit `AUTO_ASSIGNED` with `actor_id NULL`, requester + assignee notified.

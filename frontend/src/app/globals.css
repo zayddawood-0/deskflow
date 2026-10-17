@@ -1,0 +1,33 @@
+@import "tailwindcss";
+@config "../../tailwind.config.ts";
+
+:root {
+  --bg-page: #EDEDED;
+  --bg-canvas: #F5F5F5;
+  --surface: #FFFFFF;
+  --surface-muted: #EFEFEF;
+  --accent: #F0510F;
+  --accent-hover: #D9450A;
+  --accent-soft: #FDEBE3;
+  --brown: #3D2416;
+  --beige: #E4DDD2;
+  --ink: #111111;
+  --ink-muted: #7A7A7A;
+  --line: #E6E6E6;
+  --status-resolved: #22A06B;
+  --status-pending: #E8A33D;
+  --status-open: #5B6B7F;
+  --status-progress: #F0510F;
+  --status-closed: #9A9A9A;
+  --status-reopened: #7A5AF8;
+  --negative: #E5481B;
+
+  --radius-card: 24px;
+  --radius-control: 9999px;
+}
+
+body {
+  background: var(--bg-page);
+  color: var(--ink);
+  font-family: var(--font-manrope), system-ui, sans-serif;
+}

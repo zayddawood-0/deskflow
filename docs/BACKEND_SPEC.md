@@ -19,7 +19,7 @@ backend/
 │   └── versions/
 │       └── 0001_initial.py         # ALL enums, tables, indexes, trigger, seed rows
 ├── app/
-│   ├── main.py                     # create_app(): CORS, routers, exception handlers, /health, logging
+│   ├── main.py                     # create_app(): CORS, routers, exception handlers, /api/v1/health, logging
 │   ├── api/
 │   │   └── v1/
 │   │       ├── router.py           # api_router = APIRouter(prefix="/api/v1"); includes all resource routers
@@ -54,7 +54,7 @@ backend/
 │   │   ├── auth.py  user.py  category.py  sla_policy.py
 │   │   ├── ticket.py  comment.py  audit.py  dashboard.py  notification.py
 │   ├── services/
-│   │   ├── auth_service.py         # register, login, refresh (rotation), logout, change_password
+│   │   ├── auth_service.py         # register, login (sets refresh cookie), refresh (rotation, rotates cookie), logout (clears cookie), change_password
 │   │   ├── user_service.py
 │   │   ├── category_service.py
 │   │   ├── sla_policy_service.py
@@ -106,7 +106,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"  # CORS_ORIGINS (comma-separated)
     sla_at_risk_threshold: float = 0.75          # SLA_AT_RISK_THRESHOLD
     reopen_window_days: int = 7                  # REOPEN_WINDOW_DAYS
-    sla_scan_secret: str = "local-scan-secret"   # SLA_SCAN_SECRET
+    internal_task_token: str = "local-internal-token"  # INTERNAL_TASK_TOKEN (X-Internal-Token for /internal/sla-scan)
     log_level: str = "INFO"                      # LOG_LEVEL
     app_version: str = "1.0.0"
 
@@ -127,7 +127,7 @@ def get_settings() -> Settings: ...
 | `get_db()` | yields a `Session` from `SessionLocal`; commits on clean exit, rolls back on exception; always closes |
 | `get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer), db = Depends(get_db))` | decode JWT → `sub` → load user → `401 UNAUTHORIZED` if missing/expired/invalid/inactive |
 | `require_roles(*roles)` | factory returning a dependency: `get_current_user` + role check → `403 FORBIDDEN` (`Depends(require_roles("admin"))`) |
-| `get_scan_secret_header(x_sla_scan_secret: str = Header(...))` | constant-time compare with settings → else 403 |
+| `get_internal_token_header(x_internal_token: str = Header(...))` | constant-time compare with `settings.internal_task_token` → else 403 |
 
 Routers compose them: `user = Depends(get_current_user)`, `admin = Depends(require_roles("admin"))`. Ownership checks live in services (they already load the ticket).
 
@@ -189,7 +189,8 @@ def check_and_persist_breaches(db, ticket, actor | None) -> None
     # AT_RISK → notification SLA_AT_RISK (deduped)
     # breached & not sla_breached → sla_breached=True, audit SLA_BREACHED (actor_id NULL),
     #                               notifications SLA_BREACHED → assignee + requester
-def scan_all_open(db) -> dict                                # powers POST /internal/sla-scan
+def scan_all_open(db) -> dict                                # powers POST /internal/sla-scan (idempotent: breach flag
+                                                             # only flips false→true; SLA notifications deduped)
 ```
 
 Serialized ticket schemas call `sla_state(...)` via a `computed_ticket_schema(ticket, settings)` helper so every read path returns a fresh `sla_state`.
@@ -250,8 +251,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
     register_exception_handlers(app)
     limiter.install(app)                       # slowapi
-    app.include_router(api_router)             # prefix /api/v1
-    app.add_api_route("/health", health_check, methods=["GET"])   # unprefixed
+    app.include_router(api_router)             # prefix /api/v1 (health lives inside: GET /api/v1/health)
     return app
 
 app = create_app()

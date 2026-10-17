@@ -253,7 +253,7 @@ Indexes: `ix_audit_ticket (ticket_id, created_at)`; `ix_audit_actor (actor_id)`;
 
 Indexes: `ix_notifications_user_created (user_id, created_at DESC)`; partial `ix_notifications_unread (user_id) WHERE is_read = false`.
 
-Dedup rule (service-level, no constraint): before creating `SLA_AT_RISK`/`SLA_BREACHED` for a ticket, skip if an unread notification of the same `(user_id, type, ticket_id)` already exists.
+Dedup rule (service-level, no constraint): before creating `SLA_AT_RISK`/`SLA_BREACHED` for a ticket, **skip if a notification of the same `(user_id, type, ticket_id)` already exists — read or unread**. "Ever exists" (not "unread exists") is what makes the periodic scan idempotent: re-running it never duplicates SLA notifications. Non-SLA types (ASSIGNED, COMMENT_ADDED, STATUS_CHANGED, …) have no dedup — repeats are legitimate.
 
 ### 3.8 `refresh_tokens`
 

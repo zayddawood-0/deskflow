@@ -11,18 +11,18 @@
 flowchart TB
     subgraph client["Client — Vercel"]
         U["Browser"]
-        N["Next.js App Router<br/>React Server Components + Client Components<br/>TanStack Query · React Hook Form + Zod · Recharts"]
+        N["Next.js App Router<br/>React Server Components + Client Components<br/>TanStack Query · React Hook Form + Zod · Recharts<br/>same-origin /api/v1/* → rewrites() proxy"]
     end
     subgraph server["Server — Render"]
-        R["FastAPI (Python 3.12)<br/>/api/v1<br/>routers → services → repositories<br/>JWT auth · RBAC · slowapi rate limit"]
+        R["FastAPI (Python 3.12)<br/>/api/v1<br/>routers → services → repositories<br/>JWT auth (httpOnly refresh cookie) · RBAC · slowapi rate limit"]
     end
     subgraph data["Data — Neon (PostgreSQL 16)"]
         DB[("PostgreSQL<br/>users · categories · sla_policies · tickets<br/>ticket_comments · audit_logs · notifications · refresh_tokens · counters")]
     end
-    G["GitHub Actions<br/>CI (ruff, pytest, lint, tsc, build)<br/>CD (alembic → Neon, Render hook, Vercel CLI)"]
+    G["GitHub Actions<br/>CI (ruff, pytest, lint, tsc, build)<br/>CD (alembic → Neon, Render hook, Vercel CLI)<br/>Scheduled (health ping + SLA scan every 15 min)"]
 
-    U -- "HTTPS · JSON · Authorization: Bearer <access_token>" --> N
-    N -- "server-side fetch / client hooks via api-client.ts" --> R
+    U -- "HTTPS · same-origin /api/v1/* · Bearer access token (memory)<br/>refresh cookie (httpOnly, Path=/api/v1/auth)" --> N
+    N -- "Next.js rewrites proxy → BACKEND_URL" --> R
     R -- "SQLAlchemy 2.0 (sync, psycopg2)" --> DB
     G -. deploys .-> N
     G -. deploys + migrates .-> R
@@ -48,7 +48,7 @@ sequenceDiagram
 
     C->>H: render + useQuery/useMutation
     H->>A: request(path, {body, auth})
-    A->>A: attach Authorization: Bearer access_token<br/>on 401 → POST /auth/refresh once → retry
+    A->>A: attach Authorization: Bearer access_token<br/>(same-origin /api/v1/* → Next rewrites proxy → API;<br/>refresh cookie rides along on /api/v1/auth/*)<br/>on 401 → POST /api/v1/auth/refresh once → retry
     A->>RT: HTTP request
     RT->>RT: Pydantic validation (422 on failure)<br/>get_current_user (JWT) + require_role / ownership checks (401/403/404)
     RT->>SV: business call (e.g. ticket_service.transition(...))
@@ -117,7 +117,7 @@ flowchart LR
 - **Route groups:** `(auth)` — unauthenticated pages with a minimal layout; `(app)` — authenticated shell (navbar, icon rail, notification bell) wrapping every protected page.
 - **Server vs client components:** pages are server components by default (fast first paint, metadata). Anything interactive — forms, filters, tables with pagination, charts, the bell, countdowns — is a client component `"use client"`. Auth state lives in a client `AuthProvider` context.
 - **Data fetching:** exclusively through TanStack Query hooks in `src/hooks/`; `staleTime` 30 s for lists, 60 s for dashboard; polling only for `unread-count` (30 s). Components never call `fetch`.
-- **Auth token handling:** access token in memory (context), refresh token in `localStorage`; the single `api-client.ts` performs one silent refresh on 401 and retries. Route guards (`middleware.ts` for redirect + client `RoleGuard` for rendering) protect pages; the backend re-checks everything.
+- **Auth token handling:** access token in memory (context); refresh token in an **httpOnly cookie** set by the backend (`Path=/api/v1/auth; SameSite=Lax`). All calls go **same-origin** to `/api/v1/*` and are proxied to `BACKEND_URL` by Next.js `rewrites()` — no CORS, no cross-site cookie pain. The single `api-client.ts` performs one silent refresh on 401 and retries. Because the cookie is path-scoped, page requests never carry it, so route protection is client-side (`AuthProvider` bootstrap refresh on mount + `RoleGuard`); the backend re-checks everything.
 - **Forms:** React Hook Form + Zod schema per form; server errors from the envelope are mapped onto fields via `error.details`.
 
 ## 5. Cross-cutting concerns
@@ -146,7 +146,8 @@ One shape for every non-2xx response ([API_SPEC §2](API_SPEC.md#2-standard-enve
 
 ### 5.3 CORS
 
-- `CORS_ORIGINS` env var (comma-separated); production value `https://deskflow-web.vercel.app`; local `http://localhost:3000`. Credentials mode off (Bearer tokens, not cookies). Methods `GET, POST, PATCH, PUT, DELETE, OPTIONS`; headers `Authorization, Content-Type`.
+- The browser never calls the API cross-origin: same-origin `/api/v1/*` → Next.js `rewrites()` proxy → `BACKEND_URL`. The refresh cookie is therefore same-site by construction and `Path`-scoped to the auth endpoints.
+- The API still ships a conservative CORS config (`CORS_ORIGINS` env var; local `http://localhost:3000`) purely for direct-to-API testing and tooling; production needs none. `allow_credentials=False` (the cookie never crosses origins), methods `GET, POST, PATCH, PUT, DELETE, OPTIONS`, headers `Authorization, Content-Type`.
 
 ### 5.4 Pagination
 
@@ -166,7 +167,7 @@ One shape for every non-2xx response ([API_SPEC §2](API_SPEC.md#2-standard-enve
 |---|---|---|---|
 | D1 | **Sync SQLAlchemy 2.0 + psycopg2** (not async) | A 1-day build cannot afford async plumbing everywhere (session, migrations, test fixtures, seed). FastAPI runs sync endpoints in a threadpool; at this scale throughput is irrelevant. | Not suitable for thousands of concurrent DB-bound users. |
 | D2 | **Repository layer despite small size** | Screening criterion: shows clean architecture. Keeps SQL in one place, makes services testable. | Slightly more boilerplate. |
-| D3 | **Refresh tokens in `localStorage`, access in memory** | Vercel (frontend) ↔ Render (API) are cross-site; `SameSite=None` cookies on free tiers are a config time sink and a CSRF surface. Honest tradeoff documented in [AUTH_AND_SECURITY §3](AUTH_AND_SECURITY.md#3-token-storage-frontend). | XSS would expose the refresh token — mitigated by strict CSP-ready code, no `dangerouslySetInnerHTML`, dependency hygiene. |
+| D3 | **Same-origin `/api/v1/*` via Next rewrites + httpOnly refresh cookie** | The browser only ever talks to one origin; the Vercel→Render hop happens server-side in the rewrite proxy. The refresh token is invisible to JS (`HttpOnly`), path-scoped to `/api/v1/auth`, and `SameSite=Lax` blocks cross-site state-changing requests — no CSRF surface, no CORS/cookie-config rabbit hole on free tiers. | Route gating is client-side (the path-scoped cookie isn't visible to `middleware.ts` on page loads); access token lives in JS memory and is re-hydrated by one silent refresh on boot. Details: [AUTH_AND_SECURITY §3](AUTH_AND_SECURITY.md#3-token-storage-frontend). |
 | D4 | **SLA state computed on read, breach flag persisted** | `ON_TRACK`/`AT_RISK` depend on "now" — storing them would go stale. Only the irreversible `sla_breached` boolean is persisted (for KPIs + one-shot notifications), updated on ticket reads/mutations and by the `internal/sla-scan` endpoint. | A ticket nobody reads stays un-flagged until the scan runs; acceptable — the scan endpoint exists and is trivially cron-able. |
 | D5 | **Due dates shifted forward on resume from ON_HOLD** (instead of storing a pause offset only) | Keeps "time remaining" a trivial `due_at - now` for the UI; pause math stays in one place (the resume handler). | Naive `due_at - now` while currently paused would be wrong — the UI checks `paused_at` and shows "Paused". |
 | D6 | **Append-only audit via service writes + DB trigger** | Defense in depth: application forgetfulness is caught in review/tests; direct SQL tampering is blocked by a trigger that raises on UPDATE/DELETE of `audit_logs`. | Trigger adds one Alembic migration step. |
@@ -182,22 +183,25 @@ flowchart LR
     subgraph gh["GitHub"]
         PUSH["git push main"]
         WF["workflows/deploy.yml"]
+        SCH["workflows/scheduled.yml<br/>cron */15 + dispatch"]
     end
     subgraph neon["Neon"]
         PG[("PostgreSQL 16<br/>serverless")]
     end
     subgraph render["Render — deskflow-api"]
-        API["FastAPI / uvicorn<br/>health: GET /health"]
+        API["FastAPI / uvicorn<br/>health: GET /api/v1/health"]
     end
     subgraph vercel["Vercel — deskflow-web"]
-        WEB["Next.js"]
+        WEB["Next.js<br/>rewrites /api/* → BACKEND_URL"]
     end
     PUSH --> WF
     WF -- "1. alembic upgrade head" --> PG
     WF -- "2. POST deploy hook" --> API
     API --> PG
     WF -- "3. vercel deploy --prod" --> WEB
-    WEB -- "NEXT_PUBLIC_API_URL" --> API
+    WEB -- "server-side proxy (BACKEND_URL)" --> API
+    SCH -- "GET /api/v1/health (keep warm)" --> API
+    SCH -- "POST /api/v1/internal/sla-scan (X-Internal-Token)" --> API
 ```
 
 Details, secrets and smoke tests: [DEPLOYMENT](DEPLOYMENT.md).
