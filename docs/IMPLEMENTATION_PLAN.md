@@ -16,12 +16,12 @@ Time boxes assume ~half-day blocks; the order is chosen so there is always a **d
 
 ## Phase 2 — Data model, auth, RBAC (~3 h)
 
-- [ ] 2.1 Models for ALL tables + enums (`app/models/*`) mirroring DATABASE_SCHEMA; initial Alembic revision `0001_initial` (tables, indexes, audit immutability trigger, `sla_policies` + counter seed rows) — one revision for the whole schema
-- [ ] 2.2 `app/db/session.py`, `get_db`, transaction discipline; `tests/conftest.py` (test DB + rollback fixtures + `factories.py`)
-- [ ] 2.3 `core/security.py` (argon2, JWT create/decode, refresh-token opaque + hash) + `core/errors.py` (AppError hierarchy + handlers producing the error envelope) + `core/rate_limit.py` (slowapi on login/register)
-- [ ] 2.4 `auth_service` + `routers/auth.py`: register, login (httpOnly refresh cookie), refresh (rotation, cookie), logout (clear cookie), me, change-password — with `test_auth.py` passing
+- [x] 2.1 Models for ALL tables + enums (`app/models/*`) mirroring DATABASE_SCHEMA; initial Alembic revision `0001_initial` (tables, indexes, audit immutability trigger, `sla_policies` + counter seed rows) — one revision for the whole schema
+- [x] 2.2 `app/db/session.py`, `get_db`, transaction discipline; `tests/conftest.py` (test DB + rollback fixtures + `factories.py`)
+- [x] 2.3 `core/security.py` (argon2, JWT create/decode, refresh-token opaque + hash) + `core/errors.py` (AppError hierarchy + handlers producing the error envelope) + `core/rate_limit.py` (slowapi on login/register)
+- [x] 2.4 `auth_service` + `routers/auth.py`: register, login (httpOnly refresh cookie), refresh (rotation, cookie), logout (clear cookie), me, change-password — with `test_auth.py` passing
 - [ ] 2.5 `users` endpoints (admin) + `require_roles` dep + `routers/users.py` — `test_rbac.py` core cases green (403 matrix, self-demotion 409, deactivated token death)
-- [ ] 2.6 Frontend auth: `AuthProvider` (in-memory access + silent cookie refresh on mount), `use-auth`, `/login`, `/register`, `/settings` (profile + change password), `RoleGuard`, `(app)/layout.tsx` shell with Navbar/IconRail placeholders
+- [x] 2.6 Frontend auth: `AuthProvider` (in-memory access + silent cookie refresh on mount), `use-auth`, `/login`, `/register`, `/settings` (profile + change password), `RoleGuard`, `(app)/layout.tsx` shell with Navbar/IconRail placeholders
 - [ ] 2.7 Categories + SLA-policy endpoints (read for all, write admin) + seed rows visible via API; `test_categories_and_sla.py` minimal set
 
 ## Phase 3 — Tickets, workflow, assignment, audit (~4 h)

@@ -1,11 +1,14 @@
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy.orm import Session
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
+from app.core.errors import register_exception_handlers
 from app.core.logging import RequestIdMiddleware, configure_logging
+from app.core.rate_limit import limiter
 from app.db.session import database_is_up, get_db
 
 
@@ -27,6 +30,9 @@ def create_app() -> FastAPI:
         max_age=600,
     )
     app.add_middleware(RequestIdMiddleware)
+    register_exception_handlers(app)
+    app.state.limiter = limiter
+    app.add_middleware(SlowAPIMiddleware)
     app.include_router(api_router)
 
     @app.get("/api/v1/health", tags=["health"], response_model=None)

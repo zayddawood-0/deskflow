@@ -1,4 +1,4 @@
-import type { ErrorDetail } from "@/types/api";
+import type { AuthResponse, ErrorDetail } from "@/types/api";
 import { REQUEST_TIMEOUT_MS } from "./constants";
 
 const BASE = "/api/v1";
@@ -29,23 +29,38 @@ export class ApiError extends Error {
 
 let refreshPromise: Promise<boolean> | null = null;
 
+async function requestRefresh(): Promise<AuthResponse | null> {
+  try {
+    const res = await fetch(`${BASE}/auth/refresh`, {
+      method: "POST",
+      credentials: "same-origin",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      return null;
+    }
+    return (await res.json()) as AuthResponse;
+  } catch {
+    return null;
+  }
+}
+
+export async function refreshSession(): Promise<AuthResponse | null> {
+  const data = await requestRefresh();
+  accessToken = data?.access_token ?? null;
+  return data;
+}
+
 async function tryRefresh(): Promise<boolean> {
   if (!refreshPromise) {
     refreshPromise = (async () => {
       try {
-        const res = await fetch(`${BASE}/auth/refresh`, {
-          method: "POST",
-          credentials: "same-origin",
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
-        if (!res.ok) {
+        const data = await requestRefresh();
+        if (!data) {
           return false;
         }
-        const data = (await res.json()) as { access_token: string };
         accessToken = data.access_token;
         return true;
-      } catch {
-        return false;
       } finally {
         refreshPromise = null;
       }
