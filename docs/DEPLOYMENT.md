@@ -140,7 +140,7 @@ jobs:
         env:
           POSTGRES_USER: deskflow
           POSTGRES_PASSWORD: deskflow
-          POSTGRES_DB: deskflow_test
+          POSTGRES_DB: deskflow
         ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready
@@ -148,7 +148,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql+psycopg2://deskflow:deskflow@localhost:5432/deskflow_test
+      DATABASE_URL: postgresql+psycopg2://deskflow:deskflow@localhost:5432/deskflow
+      TEST_DATABASE_URL: postgresql+psycopg2://deskflow:deskflow@localhost:5432/deskflow_test
       SECRET_KEY: ci-only-secret-key-not-used-in-prod
       APP_ENV: development
     steps:
@@ -158,6 +159,14 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Create test database
+        env:
+          PGPASSWORD: deskflow
+        run: |
+          psql -h localhost -U deskflow -d deskflow -tAc \
+            "SELECT 1 FROM pg_database WHERE datname='deskflow_test'" \
+            | grep -q 1 || psql -h localhost -U deskflow -d deskflow \
+            -c "CREATE DATABASE deskflow_test"
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest -q --cov=app --cov-report=term-missing

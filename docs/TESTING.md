@@ -19,7 +19,7 @@ cd frontend
 npm run lint && npm run typecheck && npm run build
 ```
 
-- Test DB: `DATABASE_URL` must point at a disposable database (local: `deskflow_test` in docker-compose; CI: the Postgres 16 service container). `conftest.py` runs `Base.metadata.create_all` per session and wraps each test in a rolled-back transaction — fast and isolated; the seed script is **not** used (tests build minimal fixtures via `tests/factories.py`).
+- Test DB: `TEST_DATABASE_URL` must point at a disposable database **distinct from `DATABASE_URL`** (local: `deskflow_test` in docker-compose; CI: a `deskflow_test` database created on the Postgres 16 service container before pytest). `conftest.py` refuses to start if `TEST_DATABASE_URL` is unset or equals `DATABASE_URL` (the app's own DB), then runs `Base.metadata.create_all` per session and wraps each test in a rolled-back transaction — fast and isolated; the seed script is **not** used (tests build minimal fixtures via `tests/factories.py`).
 - Coverage target: **≥ 80 % line coverage on `app/services/`** (`--cov=app/services`); overall `app/` ≥ 70 %. The coverage gate is advisory locally, but low-coverage PRs get new tests before merging.
 
 ## 2. Test cases — backend

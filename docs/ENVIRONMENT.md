@@ -22,7 +22,7 @@ Two env files, both git-ignored; the committed templates are `backend/.env.examp
 Notes:
 - `session.py` normalizes `DATABASE_URL`: `postgres://` → `postgresql+psycopg2://`, and adds `sslmode=require` when the host is not `localhost` (covers Neon + Render).
 - Startup fails fast when `APP_ENV=production` and `SECRET_KEY` is missing or < 32 chars.
-- CI supplies `DATABASE_URL` (service container) and `SECRET_KEY` inline — no `.env` file in CI.
+- CI supplies `DATABASE_URL` and `TEST_DATABASE_URL` (both on the Postgres service container — `TEST_DATABASE_URL` points at a separate `deskflow_test` database created before pytest) and `SECRET_KEY` inline — no `.env` file in CI. `TEST_DATABASE_URL` is test-only (never read by the app) and is what `conftest.py` uses to run migrations/tests, keeping them off the app database.
 
 ### `backend/.env.example` (committed template)
 
@@ -71,7 +71,7 @@ NEXT_PUBLIC_APP_NAME=DeskFlow
 |---|---|---|
 | Local dev | `backend/.env` (from `.env.example`) | `frontend/.env.local` (from `.env.example`) |
 | Local Docker Compose | inline in `docker-compose.yml` `environment:` | inline `BACKEND_URL: http://backend:8000` (compose service name) |
-| CI (`ci.yml`) | inline job `env:` (test DB + dummy secret/token) | none — `next.config.ts` falls back to `http://localhost:8000` when `BACKEND_URL` is unset (build only needs the rewrite table to exist) |
+| CI (`ci.yml`) | inline job `env:` (dev + test DB URLs + dummy secret/token) | none — `next.config.ts` falls back to `http://localhost:8000` when `BACKEND_URL` is unset (build only needs the rewrite table to exist) |
 | Production | Render → Environment panel (`APP_ENV`, `SECRET_KEY`, `DATABASE_URL`, `INTERNAL_TASK_TOKEN`, thresholds; `CORS_ORIGINS` optional/empty) | Vercel → Project env vars (`BACKEND_URL`, `NEXT_PUBLIC_APP_NAME`) |
 | CD pipeline | GitHub Actions secrets (`NEON_DATABASE_URL`, `RENDER_DEPLOY_HOOK_URL`, `INTERNAL_TASK_TOKEN`, `VERCEL_*`) — pipeline-only, never app runtime | same |
 
