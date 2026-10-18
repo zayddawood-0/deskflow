@@ -21,6 +21,8 @@ jobs:
         working-directory: backend
     env:
       DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+      SECRET_KEY: migrate-only-secret-key-not-used-in-prod-0123456789
+      APP_ENV: development
     steps:
       - uses: actions/checkout@v7
         with:

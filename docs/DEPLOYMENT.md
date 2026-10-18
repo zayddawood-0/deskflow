@@ -216,6 +216,8 @@ jobs:
         working-directory: backend
     env:
       DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+      SECRET_KEY: migrate-only-secret-key-not-used-in-prod-0123456789
+      APP_ENV: development
     steps:
       - uses: actions/checkout@v7
         with:
@@ -263,6 +265,8 @@ jobs:
 ```
 
 Triggering: `deploy.yml` fires on the **`workflow_run` completion of `ci.yml` on `main`** and only when that CI run concluded `success` (the job-level `if`); it never deploys on red CI. `workflow_dispatch` allows a manual re-deploy. The checkout uses `github.event.workflow_run.head_sha` so the exact commit CI validated is the one migrated/deployed.
+
+Why `migrate` sets `SECRET_KEY`/`APP_ENV`: `alembic/env.py` calls `get_settings()` to read `DATABASE_URL`, and `Settings` requires `SECRET_KEY` — so the job must provide one (a throw-away literal is fine; the value is never used to sign anything during a migration) even though the DB URL is the only input that matters. `NEON_DATABASE_URL` is the sole secret this job needs; if it is unset, `DATABASE_URL` resolves to an empty string and Alembic fails immediately.
 
 Ordering guarantees: **migrations before code** (Render's new image starts against an already-migrated DB; FastAPI is backward-compatible with the previous schema for one release because migrations are additive within a release). The frontend deploy is independent of the Render build duration.
 
