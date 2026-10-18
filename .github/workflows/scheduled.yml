@@ -1,0 +1,27 @@
+name: Scheduled
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  keep-warm:
+    name: Ping API health (keep Render warm)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: GET /api/v1/health
+        run: |
+          curl --fail --silent --show-error --max-time 120 \
+            "https://deskflow-api.onrender.com/api/v1/health"
+
+  sla-scan:
+    name: SLA breach / at-risk scan
+    runs-on: ubuntu-24.04
+    steps:
+      - name: POST /api/v1/internal/sla-scan
+        run: |
+          curl --fail --silent --show-error --max-time 120 \
+            -X POST \
+            -H "X-Internal-Token: ${{ secrets.INTERNAL_TASK_TOKEN }}" \
+            "https://deskflow-api.onrender.com/api/v1/internal/sla-scan"

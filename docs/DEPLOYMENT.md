@@ -61,10 +61,10 @@ Dockerfiles: `backend/Dockerfile` (`python:3.12-slim`, `pip install -r requireme
 
 ## 2. Neon (production database)
 
-1. Create a free account → New project → region **AWS Frankfurt (eu-central-1)** (closest to the Render/Vercel defaults we use) → Postgres 16.
+1. Create a free account → New project → region **AWS Singapore (ap-southeast-1)** (matches the Render region) → Postgres 16.
 2. Copy the pooled connection string from the dashboard. Format expected by the app:
    `postgresql+psycopg2://USER:PASSWORD@HOST/deskflow?sslmode=require`
-   (Neon's dashboard may give `postgres://` — the app's `session.py` normalizes the scheme, but prefer setting the SQLAlchemy-ready form in the secret.)
+   (Neon's dashboard may give `postgres://` — both `session.py` and `alembic/env.py` normalize the scheme via `normalize_database_url`, but prefer setting the SQLAlchemy-ready form in the secret.)
 3. Create the GitHub secret **`NEON_DATABASE_URL`** with that string (used by the CD migrate job only).
 4. Add the Render public egress IPs / allow `0.0.0.0/0` for the free tier (Neon's default is anywherewith SSL — keep `sslmode=require`).
 5. Branching: leave the default `main` branch; migrations always run against it. (Rollback uses `alembic downgrade`, §7.)
@@ -77,6 +77,7 @@ Dockerfiles: `backend/Dockerfile` (`python:3.12-slim`, `pip install -r requireme
    |---|---|
    | Name | `deskflow-api` |
    | Runtime | Python |
+   | Region | Singapore |
    | Build Command | `pip install -r requirements.txt` |
    | Start Command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
    | Health Check Path | `/api/v1/health` |
@@ -96,7 +97,9 @@ Dockerfiles: `backend/Dockerfile` (`python:3.12-slim`, `pip install -r requireme
 
 ## 4. Vercel (frontend)
 
-1. `cd frontend && npx vercel link` locally (creates the project), then `npx vercel` for a first manual prod deploy if desired.
+Deploys are **CI-only**: the committed `frontend/vercel.json` sets `"git": { "deploymentEnabled": false }`, which turns off Vercel's own Git integration so nothing ships except through `deploy.yml` (Vercel CLI). Do **not** connect the GitHub repo in the Vercel dashboard's Git settings.
+
+1. `cd frontend && npx vercel link` locally (creates `.vercel/project.json`), then `npx vercel` for a first manual prod deploy if desired. `npx vercel link` may ask you to disable the Git integration — confirm; `vercel.json` already enforces it on every build.
 2. Project → Settings → Environment Variables:
    | Key | Value |
    |---|---|
@@ -184,7 +187,9 @@ jobs:
 name: Deploy
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -195,6 +200,7 @@ concurrency:
 jobs:
   migrate:
     name: Alembic → Neon
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -203,6 +209,8 @@ jobs:
       DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -232,6 +240,8 @@ jobs:
       BACKEND_URL: https://deskflow-api.onrender.com
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 20
@@ -242,6 +252,8 @@ jobs:
       - run: npx vercel build --prod
       - run: npx vercel deploy --prebuilt --prod
 ```
+
+Triggering: `deploy.yml` fires on the **`workflow_run` completion of `ci.yml` on `main`** and only when that CI run concluded `success` (the job-level `if`); it never deploys on red CI. `workflow_dispatch` allows a manual re-deploy. The checkout uses `github.event.workflow_run.head_sha` so the exact commit CI validated is the one migrated/deployed.
 
 Ordering guarantees: **migrations before code** (Render's new image starts against an already-migrated DB; FastAPI is backward-compatible with the previous schema for one release because migrations are additive within a release). The frontend deploy is independent of the Render build duration.
 
@@ -283,6 +295,7 @@ jobs:
 
 Notes:
 - `INTERNAL_TASK_TOKEN` (GitHub secret) must equal the Render env var of the same name — the backend compares the `X-Internal-Token` header against it with a constant-time compare.
+- Until Phase 4 implements `POST /api/v1/internal/sla-scan`, the `sla-scan` job fails with a `404` (expected); `keep-warm` is already valid. The job goes green as soon as the endpoint ships.
 - A red `keep-warm` run means the API was unreachable for 2 minutes (usually a cold start exceeding the timeout or an outage); a red `sla-scan` run means a bad/missing token or a server error — check the run's curl output.
 - Cron on the free tier of GitHub Actions can be delayed by several minutes under load; 15-minute granularity is a best-effort wake-up, not a hard guarantee.
 - Both jobs are plain `curl` — no checkout needed, they run in seconds.
