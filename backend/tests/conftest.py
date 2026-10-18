@@ -10,8 +10,6 @@ from sqlalchemy.pool import NullPool
 from app.db.base import Base
 from app.db.session import get_db, normalize_database_url
 
-DEFAULT_TEST_URL = "postgresql+psycopg2://deskflow:deskflow@localhost:5432/deskflow_test"
-
 
 def _env_file_value(key: str) -> str | None:
     env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -23,15 +21,24 @@ def _env_file_value(key: str) -> str | None:
     return None
 
 
+def _dev_database_url() -> str | None:
+    url = os.environ.get("DATABASE_URL") or _env_file_value("DATABASE_URL")
+    return normalize_database_url(url) if url else None
+
+
 def _resolve_test_database_url() -> str:
-    url = (
-        os.environ.get("TEST_DATABASE_URL")
-        or _env_file_value("TEST_DATABASE_URL")
-        or os.environ.get("DATABASE_URL")
-        or _env_file_value("DATABASE_URL")
-        or DEFAULT_TEST_URL
-    )
-    return normalize_database_url(url)
+    url = os.environ.get("TEST_DATABASE_URL") or _env_file_value("TEST_DATABASE_URL")
+    if not url:
+        raise RuntimeError(
+            "TEST_DATABASE_URL is not set. Tests must never run against DATABASE_URL; "
+            "add TEST_DATABASE_URL to backend/.env or export it in the environment."
+        )
+    resolved = normalize_database_url(url)
+    if resolved == _dev_database_url():
+        raise RuntimeError(
+            "TEST_DATABASE_URL must point at a different database than DATABASE_URL."
+        )
+    return resolved
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -47,9 +54,54 @@ def _test_env() -> None:
 @pytest.fixture(scope="session")
 def engine():
     eng = create_engine(os.environ["DATABASE_URL"], pool_pre_ping=True, poolclass=NullPool)
+    dev_url = _dev_database_url()
+    if dev_url is not None:
+        assert str(eng.url) != dev_url, "tests must never run against the dev database"
     Base.metadata.create_all(eng)
+    _seed_reference_data(eng)
     yield eng
     eng.dispose()
+
+
+def _seed_reference_data(eng) -> None:
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO sla_policies (priority, first_response_minutes, resolution_minutes)
+                VALUES ('CRITICAL', 60, 240), ('HIGH', 240, 1440),
+                       ('MEDIUM', 480, 2880), ('LOW', 1440, 4320)
+                ON CONFLICT (priority) DO NOTHING
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO counters (name, value) VALUES ('ticket', 1040) "
+                "ON CONFLICT (name) DO NOTHING"
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE OR REPLACE FUNCTION trg_audit_logs_immutable() RETURNS trigger AS $$
+                BEGIN
+                    RAISE EXCEPTION 'audit_logs is append-only: UPDATE/DELETE are not allowed';
+                END;
+                $$ LANGUAGE plpgsql
+                """
+            )
+        )
+        conn.execute(text("DROP TRIGGER IF EXISTS trg_audit_logs_immutable ON audit_logs"))
+        conn.execute(
+            text(
+                """
+                CREATE TRIGGER trg_audit_logs_immutable
+                BEFORE UPDATE OR DELETE ON audit_logs
+                FOR EACH ROW EXECUTE FUNCTION trg_audit_logs_immutable()
+                """
+            )
+        )
 
 
 @pytest.fixture()

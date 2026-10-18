@@ -69,3 +69,49 @@ export const SLA_STATE_COLORS: Record<SlaState, string> = {
 
 export const DEFAULT_PAGE_SIZE = 20;
 export const REQUEST_TIMEOUT_MS = 15_000;
+
+export const AGENT_ROLES = ["agent", "admin"] as const;
+export const REQUESTER_ROLES = ["requester", "agent", "admin"] as const;
+
+export interface TransitionRule {
+  to: TicketStatus;
+  roles: readonly UserRole[];
+}
+
+export const TICKET_TRANSITIONS: Record<TicketStatus, readonly TransitionRule[]> = {
+  OPEN: [
+    { to: "IN_PROGRESS", roles: AGENT_ROLES },
+    { to: "ON_HOLD", roles: AGENT_ROLES },
+  ],
+  IN_PROGRESS: [
+    { to: "ON_HOLD", roles: AGENT_ROLES },
+    { to: "RESOLVED", roles: AGENT_ROLES },
+  ],
+  ON_HOLD: [{ to: "IN_PROGRESS", roles: AGENT_ROLES }],
+  RESOLVED: [
+    { to: "CLOSED", roles: REQUESTER_ROLES },
+    { to: "REOPENED", roles: REQUESTER_ROLES },
+  ],
+  CLOSED: [{ to: "REOPENED", roles: REQUESTER_ROLES }],
+  REOPENED: [{ to: "IN_PROGRESS", roles: AGENT_ROLES }],
+};
+
+export interface TicketTab {
+  value: string;
+  label: string;
+  roles?: readonly UserRole[];
+}
+
+export const TICKET_TABS: readonly TicketTab[] = [
+  { value: "all", label: "All tickets" },
+  { value: "mine", label: "Assigned to me", roles: AGENT_ROLES },
+  { value: "unassigned", label: "Unassigned", roles: AGENT_ROLES },
+];
+
+export const TICKET_SORTS = [
+  { value: "-created_at", label: "Newest" },
+  { value: "created_at", label: "Oldest" },
+  { value: "-priority", label: "Priority" },
+  { value: "due_at", label: "Due soonest" },
+  { value: "-updated_at", label: "Recently updated" },
+] as const;

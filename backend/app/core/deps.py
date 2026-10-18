@@ -1,12 +1,14 @@
+import hmac
 import uuid
 from collections.abc import Callable
 from typing import Annotated
 
 import jwt
-from fastapi import Depends
+from fastapi import Depends, Header
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.errors import ForbiddenError, UnauthorizedError
 from app.core.security import decode_access_token
 from app.db.session import get_db
@@ -42,3 +44,11 @@ def require_roles(*roles: UserRole) -> Callable[..., User]:
         return user
 
     return dependency
+
+
+def get_internal_token_header(
+    x_internal_token: Annotated[str | None, Header()] = None,
+) -> None:
+    expected = get_settings().internal_task_token
+    if x_internal_token is None or not hmac.compare_digest(x_internal_token, expected):
+        raise ForbiddenError("Invalid internal task token.")

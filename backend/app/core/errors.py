@@ -40,6 +40,16 @@ class ConflictError(AppError):
     status_code = 409
 
 
+class AlreadyAssignedError(AppError):
+    code = "ALREADY_ASSIGNED"
+    status_code = 409
+
+
+class ValidationError(AppError):
+    code = "VALIDATION_ERROR"
+    status_code = 422
+
+
 class InvalidTransitionError(AppError):
     code = "INVALID_TRANSITION"
     status_code = 409

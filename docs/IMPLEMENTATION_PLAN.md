@@ -11,7 +11,7 @@ Time boxes assume ~half-day blocks; the order is chosen so there is always a **d
 - [x] 1.3 Alembic initialized (`alembic.ini`, `env.py` wiring `Base.metadata`); empty DB migrated against Docker Postgres
 - [x] 1.4 Frontend skeleton: `create-next-app` (TS strict, Tailwind, App Router, `src/`), Manrope via `next/font`, design tokens in `tailwind.config.ts` + `globals.css` (copy from DESIGN_SYSTEM §1), base UI primitives: `Button`, `IconButton`, `Card`, `Input`, `Skeleton`
 - [x] 1.5 `frontend/src/lib/api-client.ts` (same-origin `/api/v1` base via rewrites, Bearer from memory, refresh-once w/ cookie, `ApiError`) + `types/api.ts` envelopes + `constants.ts` enums + `next.config.ts` rewrite to `BACKEND_URL`
-- [ ] 1.6 CI: `.github/workflows/ci.yml` as in DEPLOYMENT §5.1; push branch, confirm **green** (health test included: `test_health.py`)
+- [x] 1.6 CI: `.github/workflows/ci.yml` as in DEPLOYMENT §5.1; push branch, confirm **green** (health test included: `test_health.py`)
 - [x] 1.7 `docker compose up --build` sanity check (all three services); revert to db-only dev mode
 
 ## Phase 2 — Data model, auth, RBAC (~3 h)
@@ -20,18 +20,18 @@ Time boxes assume ~half-day blocks; the order is chosen so there is always a **d
 - [x] 2.2 `app/db/session.py`, `get_db`, transaction discipline; `tests/conftest.py` (test DB + rollback fixtures + `factories.py`)
 - [x] 2.3 `core/security.py` (argon2, JWT create/decode, refresh-token opaque + hash) + `core/errors.py` (AppError hierarchy + handlers producing the error envelope) + `core/rate_limit.py` (slowapi on login/register)
 - [x] 2.4 `auth_service` + `routers/auth.py`: register, login (httpOnly refresh cookie), refresh (rotation, cookie), logout (clear cookie), me, change-password — with `test_auth.py` passing
-- [ ] 2.5 `users` endpoints (admin) + `require_roles` dep + `routers/users.py` — `test_rbac.py` core cases green (403 matrix, self-demotion 409, deactivated token death)
+- [x] 2.5 `users` endpoints (admin) + `require_roles` dep + `routers/users.py` — `test_rbac.py` core cases green (403 matrix, self-demotion 409, deactivated token death)
 - [x] 2.6 Frontend auth: `AuthProvider` (in-memory access + silent cookie refresh on mount), `use-auth`, `/login`, `/register`, `/settings` (profile + change password), `RoleGuard`, `(app)/layout.tsx` shell with Navbar/IconRail placeholders
-- [ ] 2.7 Categories + SLA-policy endpoints (read for all, write admin) + seed rows visible via API; `test_categories_and_sla.py` minimal set
+- [x] 2.7 Categories + SLA-policy endpoints (read for all, write admin) + seed rows visible via API; `test_categories_and_sla.py` minimal set
 
 ## Phase 3 — Tickets, workflow, assignment, audit (~4 h)
 
-- [ ] 3.1 `ticket_repository` (list query: visibility, filters, sort, pagination, `allocate_ticket_number`) + `ticket_service.create` (due dates from policies, audit `TICKET_CREATED`)
-- [ ] 3.2 `status_machine.py` + `ticket_service.transition` with all side effects (first response, pause/resume, resolved_at, audit, notifications) — `test_transitions.py` fully green (valid + invalid + role + reopen-window matrices)
-- [ ] 3.3 `assignment_service` (least-loaded pick, self-assign, admin assign/unassign, notifications) — `test_assignment.py` green
-- [ ] 3.4 `audit_service.record` used by every mutation above; `GET /tickets/{id}/audit` + global `GET /audit` — `test_audit.py` green
-- [ ] 3.5 Tickets endpoints complete: `GET/POST/PATCH /tickets`, `/status`, `/self-assign`, `/assign`, `/unassign` — `test_tickets.py` green
-- [ ] 3.6 Frontend tickets: `use-tickets` hooks, `/tickets` list (DataTable, filters + URL sync, tabs), `/tickets/new` form (RHF+Zod), `/tickets/[id]` shell with status buttons + assignee combobox + timeline (comments land in Phase 4)
+- [x] 3.1 `ticket_repository` (list query: visibility, filters, sort, pagination, `allocate_ticket_number`) + `ticket_service.create` (due dates from policies, audit `TICKET_CREATED`)
+- [x] 3.2 `status_machine.py` + `ticket_service.transition` with all side effects (first response, pause/resume, resolved_at, audit, notifications) — `test_transitions.py` fully green (valid + invalid + role + reopen-window matrices)
+- [x] 3.3 `assignment_service` (least-loaded pick, self-assign, admin assign/unassign, notifications) — `test_assignment.py` green
+- [x] 3.4 `audit_service.record` used by every mutation above; `GET /tickets/{id}/audit` + global `GET /audit` — `test_audit.py` green
+- [x] 3.5 Tickets endpoints complete: `GET/POST/PATCH /tickets`, `/status`, `/self-assign`, `/assign`, `/unassign` — `test_tickets.py` green
+- [x] 3.6 Frontend tickets: `use-tickets` hooks, `/tickets` list (DataTable, filters + URL sync, tabs), `/tickets/new` form (RHF+Zod), `/tickets/[id]` shell with status buttons + assignee combobox + timeline (comments land in Phase 4)
 
 ## Phase 4 — SLA engine, comments, notifications (~3 h)
 

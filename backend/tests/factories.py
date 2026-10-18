@@ -3,13 +3,19 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_password
+from app.core.security import create_access_token, hash_password
+from app.models.audit_log import AuditLog
 from app.models.category import Category
 from app.models.enums import TicketPriority, TicketStatus, UserRole
 from app.models.ticket import Ticket
 from app.models.user import User
 
 DEFAULT_PASSWORD = "Str0ngPass"
+
+
+def auth_header(user: User) -> dict[str, str]:
+    token, _ = create_access_token(user_id=user.id, role=user.role.value)
+    return {"Authorization": f"Bearer {token}"}
 
 
 def make_user(
@@ -76,3 +82,32 @@ def make_ticket(
     db.add(ticket)
     db.flush()
     return ticket
+
+
+def make_audit_log(
+    db: Session,
+    *,
+    entity_id: uuid.UUID,
+    ticket: Ticket | None = None,
+    actor: User | None = None,
+    action: str = "STATUS_CHANGED",
+    entity_type: str = "ticket",
+    old_value: dict | None = None,
+    new_value: dict | None = None,
+    created_at: datetime | None = None,
+) -> AuditLog:
+    entry = AuditLog(
+        actor_id=actor.id if actor else None,
+        actor_role=actor.role if actor else None,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        ticket_id=ticket.id if ticket else None,
+        old_value=old_value,
+        new_value=new_value,
+    )
+    if created_at is not None:
+        entry.created_at = created_at
+    db.add(entry)
+    db.flush()
+    return entry
