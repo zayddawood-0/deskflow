@@ -84,7 +84,7 @@ The API runs on Vercel's Python runtime as a serverless function:
 
 - `backend/vercel.json` — `"framework": "fastapi"`, `"regions": ["sin1"]` (same region as Neon), `"git": { "deploymentEnabled": false }` (deploys only via `deploy.yml`).
 - `backend/index.py` — the recognized Vercel entrypoint; it re-exports the FastAPI `app` from `app.main`. Vercel's FastAPI preset serves the whole app from this single function (every path: `/api/v1/*`, `/docs`, `/api/v1/health`), with the project root on the import path.
-- `requirements.txt` at `backend/` root is installed by `@vercel/python` automatically.
+- `requirements.txt` at `backend/` root is installed by Vercel's Python builder, and `backend/.python-version` pins the function to Python `3.12`.
 - `app/db/session.py` detects the runtime via the `VERCEL=1` env var Vercel sets and switches SQLAlchemy to **`NullPool`** — no persistent connection pool on an ephemeral instance; connections open per session and close with it, which is the correct shape for serverless + Neon's pooler.
 
 ### 3.1 Create the project
@@ -186,6 +186,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: "3.12"
+      - run: uv python install 3.12
       - run: npx vercel pull --yes --environment=production
       - run: npx vercel build --prod
       - run: npx vercel deploy --prebuilt --prod
@@ -220,6 +224,8 @@ jobs:
 Triggering: `deploy.yml` fires on the **`workflow_run` completion of `ci.yml` on `main`** and only when that CI run concluded `success` (the job-level `if`); it never deploys on red CI. `workflow_dispatch` allows a manual re-deploy. The checkout uses `github.event.workflow_run.head_sha` so the exact commit CI validated is the one migrated/deployed.
 
 How the Vercel CLI jobs work: `vercel pull --yes --environment=production` downloads the project's production env vars (into `.vercel/`, git-ignored) and links to the project identified by `VERCEL_TOKEN` + `VERCEL_ORG_ID` + `VERCEL_PROJECT_ID_*`; `vercel build --prod` builds locally (Python lambda for the API, `next build` for the web app); `vercel deploy --prebuilt --prod` uploads the prebuilt output — no build happens on Vercel's side.
+
+The API job installs **`uv`** (`astral-sh/setup-uv`) before building: Vercel's Python builder uses `uv` to create the function venv and install `requirements.txt`. Vercel's own build image ships `uv`, but the GitHub runner does not — without this step `vercel build` fails with `[UV_ERROR] uv is required but was not found in PATH`. `uv python install 3.12` pre-fetches the interpreter (also pinned in `backend/.python-version`). The web job needs no `uv` — Next.js only.
 
 Why `migrate` sets `SECRET_KEY`/`APP_ENV`: `alembic/env.py` calls `get_settings()` to read `DATABASE_URL`, and `Settings` requires `SECRET_KEY` — so the job must provide one (a throw-away literal is fine; the value is never used to sign anything during a migration) even though the DB URL is the only input that matters. `NEON_DATABASE_URL` is the sole secret this job needs; if it is unset, `DATABASE_URL` resolves to an empty string and Alembic fails immediately with the explicit `DATABASE_URL is required...` error.
 
