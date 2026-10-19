@@ -2,12 +2,14 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.common import ActorRef
 
 
 class CommentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     ticket_id: uuid.UUID
     author: ActorRef

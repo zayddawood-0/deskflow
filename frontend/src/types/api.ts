@@ -130,6 +130,20 @@ export interface CreateTicketInput {
   auto_assign: boolean;
 }
 
+export interface Comment {
+  id: string;
+  ticket_id: string;
+  author: ActorRef;
+  body: string;
+  is_public: boolean;
+  created_at: string;
+}
+
+export interface CreateCommentInput {
+  body: string;
+  is_public: boolean;
+}
+
 export interface AuditEntry {
   id: string;
   actor: ActorRef | null;

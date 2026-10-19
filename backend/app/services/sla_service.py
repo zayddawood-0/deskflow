@@ -1,5 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -108,6 +109,34 @@ def evaluate_and_persist(db: Session, ticket: Ticket, now: datetime) -> SLAState
             ticket=ticket,
         )
     return state
+
+
+def scan_all_open(db: Session) -> dict[str, int]:
+    from app.models.notification import Notification
+    from app.repositories import ticket_repository
+
+    now = datetime.now(UTC)
+    tickets = ticket_repository.list_open_for_sla(db)
+    before = db.execute(select(func.count()).select_from(Notification)).scalar_one()
+
+    newly_breached = 0
+    at_risk = 0
+    for ticket in tickets:
+        was_breached = ticket.sla_breached
+        state = evaluate_and_persist(db, ticket, now)
+        if state == SLAState.BREACHED and not was_breached:
+            newly_breached += 1
+        if state == SLAState.AT_RISK:
+            at_risk += 1
+
+    db.flush()
+    after = db.execute(select(func.count()).select_from(Notification)).scalar_one()
+    return {
+        "scanned": len(tickets),
+        "newly_breached": newly_breached,
+        "at_risk": at_risk,
+        "notifications_created": int(after - before),
+    }
 
 
 def is_open_for_scan(status: TicketStatus) -> bool:

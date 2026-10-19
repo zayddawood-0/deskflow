@@ -81,6 +81,15 @@ def list_tickets(
     return list(db.execute(stmt).scalars().all())
 
 
+def list_open_for_sla(db: Session) -> list[Ticket]:
+    stmt = (
+        select(Ticket)
+        .options(joinedload(Ticket.requester), joinedload(Ticket.assignee))
+        .where(Ticket.status.in_(OPEN_STATUSES))
+    )
+    return list(db.execute(stmt).scalars().all())
+
+
 def open_load_counts(db: Session) -> dict[uuid.UUID, int]:
     stmt = (
         select(Ticket.assignee_id, func.count())

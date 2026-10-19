@@ -37,9 +37,9 @@ Time boxes assume ~half-day blocks; the order is chosen so there is always a **d
 
 - [ ] 4.1 `sla_service`: `compute_due_dates`, pure `sla_state`, `apply_resume`, `check_and_persist_breaches` (flag + audit + notifications, dedup) — `test_sla.py` green incl. worked examples A–D
 - [ ] 4.2 Wire `sla_state` into every ticket serialization (list/detail/recent); `sla_state` list filter + `due_at` sort
-- [ ] 4.3 `comment_service` + comments endpoints with visibility rules and first-response effects — `test_comments.py` green (internal notes invisible to requesters)
+- [x] 4.3 `comment_service` + comments endpoints with visibility rules and first-response effects — `test_comments.py` green (internal notes invisible to requesters)
 - [ ] 4.4 `notification_service` + notifications endpoints (`list`, `unread-count`, `read`, `read-all`) — `test_notifications.py` green
-- [ ] 4.5 `internal/sla-scan` endpoint (`X-Internal-Token`) + `test_sla_scan` incl. idempotency case
+- [x] 4.5 `internal/sla-scan` endpoint (`X-Internal-Token`) + `test_sla_scan` incl. idempotency case
 - [ ] 4.6 Frontend: comment list/form with Public/Internal toggle, `SlaBadge` + live countdown (+ "Paused"), `NotificationBell` (poll 30 s, dropdown, mark-all), ticket status buttons driven by the transition matrix constants
 
 ## Phase 5 — Frontend pages complete (~4 h)

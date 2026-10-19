@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/api-client";
 import { ROLE_LABELS, TICKET_STATUS_LABELS } from "@/lib/constants";
 import { formatDate } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { useTicketComments } from "@/hooks/use-comments";
 import { useTicket, useTicketAudit } from "@/hooks/use-tickets";
 import type { AuditEntry } from "@/types/api";
 import { Card } from "@/components/ui/Card";
@@ -12,6 +13,8 @@ import { PriorityPill } from "@/components/ui/PriorityPill";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { AssignControl } from "@/components/tickets/AssignControl";
+import { CommentForm } from "@/components/tickets/CommentForm";
+import { CommentList } from "@/components/tickets/CommentList";
 import { SlaBadge } from "@/components/tickets/SlaBadge";
 import { TicketStatusActions } from "@/components/tickets/TicketStatusActions";
 
@@ -76,6 +79,7 @@ export default function TicketDetailPage() {
   const id = params.id;
   const ticket = useTicket(id);
   const audit = useTicketAudit(id);
+  const comments = useTicketComments(id);
 
   if (ticket.isLoading) {
     return (
@@ -98,6 +102,7 @@ export default function TicketDetailPage() {
 
   const data = ticket.data;
   const role = user?.role ?? "requester";
+  const canPostInternal = role === "agent" || role === "admin";
 
   return (
     <div className="flex flex-col gap-6">
@@ -119,6 +124,17 @@ export default function TicketDetailPage() {
         <div className="flex flex-col gap-6">
           <Card title="Description">
             <p className="whitespace-pre-wrap text-sm text-ink">{data.description}</p>
+          </Card>
+
+          <Card title="Conversation" subtitle="Public comments and internal notes">
+            {comments.isLoading ? (
+              <Skeleton className="h-24 w-full" />
+            ) : (
+              <CommentList comments={comments.data?.items ?? []} />
+            )}
+            <div className="mt-4 border-t border-line/70 pt-4">
+              <CommentForm ticketId={id} canPostInternal={canPostInternal} />
+            </div>
           </Card>
 
           <Card title="Activity" subtitle="Audit trail for this ticket">

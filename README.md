@@ -35,6 +35,7 @@ This is an honest status, not a wish list. **Backend** = the endpoint/service + 
 | Status workflow | ✅ | ✅ | `OPEN → IN_PROGRESS ⇄ ON_HOLD → RESOLVED → CLOSED`, plus `REOPENED`; invalid transitions return `409` |
 | SLA engine | ✅ | ✅ | per-priority first-response & resolution targets, pause/resume math, `ON_TRACK / AT_RISK / BREACHED`, automatic breach flag + notification rows |
 | Assignment | ✅ | ✅ | least-loaded auto-assign on creation, agent self-assign, admin assign/unassign |
+| Comments & internal notes | ✅ | ✅ | public comments + agent/admin-only internal notes; requesters never receive internal notes on any read path; the first public agent/admin comment sets `first_responded_at`; thread UI with a Public/Internal toggle (internal notes shown with an amber tint) |
 | Audit trail | ✅ | ✅ (per ticket) | append-only — a DB trigger rejects `UPDATE`/`DELETE`; per-ticket timeline in the UI, global list via `GET /api/v1/audit` |
 | Users admin API | ✅ | ❌ | list / create / get / update / deactivate; self-demotion blocked → no admin screen yet |
 | Categories API | ✅ | ❌ | read for all, write for admins |
@@ -45,10 +46,8 @@ This is an honest status, not a wish list. **Backend** = the endpoint/service + 
 
 - **Dashboard** (KPI cards, tickets-per-day chart, SLA trend, breakdowns) — neither the `GET /api/v1/dashboard/stats` endpoint nor the page exists.
 - **Notifications** — the service writes notification rows (assignments, comments, SLA flags), but there is no notifications API and no bell UI yet.
-- **Comments & internal notes** — the service + repository exist and the seed writes comments, but there is no comments API and no thread UI yet.
 - **Admin web pages** (users, categories, SLA policies) — APIs only, no screens.
 - **Global audit-log page** — the API exists; only the per-ticket timeline is rendered.
-- **`POST /api/v1/internal/sla-scan`** — the endpoint the scheduled workflow calls is not implemented yet.
 - **Live ticking SLA countdowns** and the 30-second notification poll.
 
 ## Demo credentials
@@ -112,7 +111,7 @@ Order of operations: **CI → migrate → Vercel API → Vercel web**, plus a sc
    - **Vercel web** — same Vercel CLI flow → `deskflow-web` (`frontend/`, `BACKEND_URL = ${{ vars.API_BASE_URL }}`).
 3. **Scheduled** — `.github/workflows/scheduled.yml`, every 15 minutes:
    - keep-warm `GET /api/v1/health` (`database: "up"`);
-   - `POST /api/v1/internal/sla-scan` with the `X-Internal-Token` header — the endpoint is not implemented yet (see backlog), so this step is currently a placeholder.
+   - `POST /api/v1/internal/sla-scan` with the `X-Internal-Token` header — flags newly breached tickets (idempotently) and writes `SLA_BREACHED` audit entries.
 
 Full setup guide (Neon/Vercel, every secret and variable, rollback, post-deploy smoke test): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
@@ -176,7 +175,7 @@ Full reference: [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md).
 | `CORS_ORIGINS` | Allowed origins — only for direct-to-API testing (the app goes same-origin through the Next rewrite proxy) | `http://localhost:3000` |
 | `SLA_AT_RISK_THRESHOLD` | Fraction of SLA used that means AT_RISK | `0.75` |
 | `REOPEN_WINDOW_DAYS` | Days after CLOSED during which a ticket can be reopened | `7` |
-| `INTERNAL_TASK_TOKEN` | `X-Internal-Token` required by the (planned) `POST /api/v1/internal/sla-scan` | `local-internal-token` |
+| `INTERNAL_TASK_TOKEN` | `X-Internal-Token` required by `POST /api/v1/internal/sla-scan` | `local-internal-token` |
 | `LOG_LEVEL` | `DEBUG` \| `INFO` \| `WARNING` | `INFO` |
 
 ### Frontend — `frontend/.env.local`
@@ -199,7 +198,7 @@ cd frontend
 npm run lint && npm run typecheck && npm run build
 ```
 
-The suites cover auth, RBAC denials, every valid/invalid status transition, SLA pause/resume/breach math, auto-assignment and the audit trail ([`backend/tests/`](backend/tests/)); the catalogue lives in [`docs/TESTING.md`](docs/TESTING.md). CI runs the exact same commands on every push and pull request.
+The suites cover auth, RBAC denials, every valid/invalid status transition, SLA pause/resume/breach math, auto-assignment, comments (including internal-note visibility) and the internal SLA scan ([`backend/tests/`](backend/tests/)); the catalogue lives in [`docs/TESTING.md`](docs/TESTING.md). CI runs the exact same commands on every push and pull request.
 
 ## Project structure
 
@@ -241,20 +240,18 @@ In priority order — finishing the partially-built surfaces first, then the str
 
 1. **Dashboard** — `GET /api/v1/dashboard/stats` + `/dashboard`: KPI cards, tickets-per-day, SLA compliance trend, breakdowns, recent tickets.
 2. **Notifications** — `/notifications` endpoints (list, unread count, mark read) + the bell with 30 s polling.
-3. **Comments & internal notes** — `/tickets/{id}/comments` endpoints + the public/internal thread UI (visibility rules already enforced in the service).
-4. **Admin pages** — `/admin/users`, `/admin/categories`, `/admin/sla` over the existing APIs.
-5. **Global audit page** — `/audit` with URL-synced filters over `GET /api/v1/audit`.
-6. **`POST /api/v1/internal/sla-scan`** — wire the scheduled scan so breaches are flagged while the app is idle.
+3. **Admin pages** — `/admin/users`, `/admin/categories`, `/admin/sla` over the existing APIs.
+4. **Global audit page** — `/audit` with URL-synced filters over `GET /api/v1/audit`.
 
 **Stretch**
 
-7. **File attachments** on tickets and comments (S3-compatible storage + signed URLs).
-8. **Email notifications** for assignment, comments and SLA warnings.
-9. **WebSocket live updates** replacing notification polling.
-10. **CSV export** of tickets and the audit log.
-11. **Dark mode** driven by the design-token layer.
-12. **SLA calendars** (pause targets outside business hours) and per-category SLA overrides.
-13. **Saved views / filters** and saved dashboard report ranges.
+5. **File attachments** on tickets and comments (S3-compatible storage + signed URLs).
+6. **Email notifications** for assignment, comments and SLA warnings.
+7. **WebSocket live updates** replacing notification polling.
+8. **CSV export** of tickets and the audit log.
+9. **Dark mode** driven by the design-token layer.
+10. **SLA calendars** (pause targets outside business hours) and per-category SLA overrides.
+11. **Saved views / filters** and saved dashboard report ranges.
 
 ## License
 

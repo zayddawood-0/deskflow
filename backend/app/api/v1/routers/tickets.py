@@ -10,7 +10,7 @@ from app.core.errors import ValidationError
 from app.db.session import get_db
 from app.models.enums import SLAState, TicketPriority, TicketStatus, UserRole
 from app.models.user import User
-from app.schemas.comment import AuditOut
+from app.schemas.comment import AuditOut, CommentCreate, CommentOut
 from app.schemas.common import Page, paginate
 from app.schemas.ticket import (
     AssignRequest,
@@ -19,7 +19,12 @@ from app.schemas.ticket import (
     TicketStatusUpdate,
     TicketUpdate,
 )
-from app.services import assignment_service, audit_service, ticket_service
+from app.services import (
+    assignment_service,
+    audit_service,
+    comment_service,
+    ticket_service,
+)
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
@@ -153,6 +158,36 @@ def unassign_ticket(ticket_id: uuid.UUID, user: AdminDep, db: DbDep) -> TicketOu
     ticket = ticket_service.get_visible(db, ticket_id, user)
     ticket = assignment_service.unassign(db, ticket=ticket, actor=user)
     return ticket_service.serialize(db, ticket)
+
+
+@router.get("/{ticket_id}/comments", response_model=Page[CommentOut])
+def list_comments(
+    ticket_id: uuid.UUID,
+    user: AnyUser,
+    db: DbDep,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+) -> Page[CommentOut]:
+    ticket = ticket_service.get_visible(db, ticket_id, user)
+    items, total = comment_service.list_comments(
+        db, ticket=ticket, user=user, page=page, page_size=page_size
+    )
+    return paginate(items, total, page, page_size)
+
+
+@router.post(
+    "/{ticket_id}/comments",
+    response_model=CommentOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_comment(
+    ticket_id: uuid.UUID, payload: CommentCreate, user: AnyUser, db: DbDep
+) -> CommentOut:
+    ticket = ticket_service.get_visible(db, ticket_id, user)
+    comment = comment_service.add_comment(
+        db, ticket=ticket, author=user, body=payload.body, is_public=payload.is_public
+    )
+    return comment_service.to_out(comment)
 
 
 @router.get("/{ticket_id}/audit", response_model=Page[AuditOut])
