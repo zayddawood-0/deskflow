@@ -5,63 +5,65 @@
 [![Frontend](https://img.shields.io/badge/frontend-Next.js_%2B_TypeScript-black)](frontend/)
 [![Database](https://img.shields.io/badge/database-PostgreSQL_16-336791)](docs/DATABASE_SCHEMA.md)
 
-**DeskFlow** is a full-stack IT helpdesk & ticketing system. Employees raise support tickets, agents work them through a status workflow with live SLA timers, and admins manage users, categories and SLA policies while monitoring an immutable audit log and an analytics dashboard.
+**DeskFlow** is a full-stack IT helpdesk & ticketing system. Employees raise support tickets, agents work them through an enforced status workflow with SLA timers that pause while a ticket is on hold, and every important action is written to an immutable audit trail. Three roles (`requester`, `agent`, `admin`) are enforced on the backend and on the frontend.
 
 Built as a screening project for the **ETL Full Stack Web Developer internship** — designed, built and deployed end-to-end in a single day.
 
-> **Pitch:** most small companies track IT support in a shared inbox or a spreadsheet. DeskFlow gives them the essentials of a real ticketing platform — role-based access, an enforced workflow, SLA timers that pause when a ticket is on hold, internal notes, and a complete audit trail — with a clean, modern dashboard that makes the state of IT support obvious in 5 seconds.
+> **Pitch:** most small companies track IT support in a shared inbox or a spreadsheet. DeskFlow gives them the essentials of a real ticketing platform — role-based access, an enforced workflow, SLA timers that pause when a ticket is on hold, and a complete audit trail — behind a clean, fast ticket queue.
 
----
-
-## Features
-
-- **Auth & RBAC** — email + password login, JWT access & refresh tokens, argon2 password hashing, three roles (`requester`, `agent`, `admin`) enforced on every endpoint and every route.
-- **Tickets** — create, list, filter (status, priority, category, assignee, SLA state), full-text search, sort, pagination, detail page.
-- **Status workflow** — `OPEN → IN_PROGRESS ⇄ ON_HOLD → RESOLVED → CLOSED`, plus `REOPENED`; enforced server-side as a state machine (invalid transitions → `409`).
-- **Priorities** — `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`.
-- **Assignment** — manual assignment by admins, self-assign by agents, and auto-assignment to the least-loaded active agent on creation.
-- **SLA engine** — per-priority first-response and resolution targets (admin-editable), timers **pause while a ticket is ON_HOLD**, live countdown + `ON_TRACK` / `AT_RISK` / `BREACHED` badges, automatic breach detection & notification.
-- **Comments & internal notes** — public conversation with the requester, plus agent-only internal notes.
-- **Audit log** — append-only record of every important event with actor, action, old/new value and timestamp; per-ticket timeline + global filterable log.
-- **Dashboard** — KPI cards, tickets-per-day bar chart, SLA compliance trend, breakdown by priority/category, recent tickets table.
-- **Notifications** — in-app bell: assignment, new comments, SLA at risk / breached.
-
-## Screenshots
-
-> _Screenshots captured after deployment — see `docs/DEMO_SCRIPT.md` for the walkthrough they correspond to._
-
-| Dashboard | Ticket detail |
-|---|---|
-| ![Dashboard](docs/screenshots/dashboard.png) | ![Ticket](docs/screenshots/ticket-detail.png) |
-
-| Tickets list | Admin — SLA policies |
-|---|---|
-| ![Tickets](docs/screenshots/tickets.png) | ![SLA](docs/screenshots/admin-sla.png) |
-
-## Live demo
+## Live
 
 | App | URL |
 |---|---|
-| Frontend (Vercel — deskflow-web) | https://deskflow-web.vercel.app |
-| API (Vercel — deskflow-api, Python serverless) | https://deskflow-api.vercel.app |
-| API docs (Swagger) | https://deskflow-api.vercel.app/docs |
+| Web (Vercel — `deskflow-web`) | **https://deskflow-web-ten.vercel.app** |
+| API (Vercel — `deskflow-api`, Python serverless) | **https://deskflow-api-five.vercel.app** |
+| API docs (Swagger) | **https://deskflow-api-five.vercel.app/docs** |
 
-> Both apps are Vercel projects (`backend` and `frontend` root directories) deployed only through GitHub Actions + the Vercel CLI. The API idles to zero as a serverless function — the first request may take a few seconds cold; the frontend shows a "waking up" skeleton and retries automatically.
+Both are Vercel projects (root directories `frontend/` and `backend/`) deployed exclusively through GitHub Actions + the Vercel CLI. The API is a serverless function that idles to zero, so the first request after a period of inactivity can take a few seconds to wake.
+
+## What's built — and what isn't
+
+This is an honest status, not a wish list. **Backend** = the endpoint/service + tests exist and are deployed; **Web UI** = a reviewer can do it in the browser today.
+
+### Shipped (live now)
+
+| Area | Backend | Web UI | Notes |
+|---|---|---|---|
+| Auth — register, login, refresh, logout, change password | ✅ | ✅ | JWT access token held in memory + `httpOnly` refresh cookie; argon2 password hashing |
+| RBAC — `requester` / `agent` / `admin` | ✅ | ✅ | enforced per endpoint (`require_roles`) and per route (`RoleGuard`) |
+| Tickets — create, list, detail, edit | ✅ | ✅ | API filters: status, priority, category, assignee, unassigned, SLA state + search, sort, pagination. The list UI exposes role tabs, status/priority/sort filters, search and pagination |
+| Status workflow | ✅ | ✅ | `OPEN → IN_PROGRESS ⇄ ON_HOLD → RESOLVED → CLOSED`, plus `REOPENED`; invalid transitions return `409` |
+| SLA engine | ✅ | ✅ | per-priority first-response & resolution targets, pause/resume math, `ON_TRACK / AT_RISK / BREACHED`, automatic breach flag + notification rows |
+| Assignment | ✅ | ✅ | least-loaded auto-assign on creation, agent self-assign, admin assign/unassign |
+| Audit trail | ✅ | ✅ (per ticket) | append-only — a DB trigger rejects `UPDATE`/`DELETE`; per-ticket timeline in the UI, global list via `GET /api/v1/audit` |
+| Users admin API | ✅ | ❌ | list / create / get / update / deactivate; self-demotion blocked → no admin screen yet |
+| Categories API | ✅ | ❌ | read for all, write for admins |
+| SLA policy API | ✅ | ❌ | read for all, update for admins |
+| Seed data | ✅ | — | 9 users, 6 categories, 4 SLA policies, 40 tickets spanning 45 days (comments, internal notes, audit, notifications, 9 breached, 5 at-risk, 5 paused) |
+
+### Not built yet
+
+- **Dashboard** (KPI cards, tickets-per-day chart, SLA trend, breakdowns) — neither the `GET /api/v1/dashboard/stats` endpoint nor the page exists.
+- **Notifications** — the service writes notification rows (assignments, comments, SLA flags), but there is no notifications API and no bell UI yet.
+- **Comments & internal notes** — the service + repository exist and the seed writes comments, but there is no comments API and no thread UI yet.
+- **Admin web pages** (users, categories, SLA policies) — APIs only, no screens.
+- **Global audit-log page** — the API exists; only the per-ticket timeline is rendered.
+- **`POST /api/v1/internal/sla-scan`** — the endpoint the scheduled workflow calls is not implemented yet.
+- **Live ticking SLA countdowns** and the 30-second notification poll.
 
 ## Demo credentials
 
-Seeded by `python -m app.db.seed` (also pre-applied in production):
+Seeded by `python -m app.db.seed` (already applied in production):
 
 | Role | Email | Password | Use for |
 |---|---|---|---|
-| Admin | `admin@deskflow.dev` | `Admin@1234` | Dashboard, audit log, user/category/SLA management |
-| Agent | `agent1@deskflow.dev` | `Agent@1234` | Queue, assignment, comments, internal notes, SLA timers |
-| Agent | `agent2@deskflow.dev` | `Agent@1234` | Second agent (least-loaded auto-assign demo) |
-| Agent | `agent3@deskflow.dev` | `Agent@1234` | Third agent |
-| Requester | `requester1@deskflow.dev` | `Requester@1234` | Raise tickets, comment, close/reopen own tickets |
+| Admin | `admin@deskflow.dev` | `Admin@1234` | Manage users, categories and SLA policies (API / Swagger today) |
+| Agent | `agent1@deskflow.dev` | `Agent@1234` | Queue, assignment, status workflow, SLA timers |
+| Agent | `agent2@deskflow.dev` · `agent3@deskflow.dev` | `Agent@1234` | Least-loaded auto-assign demo |
+| Requester | `requester1@deskflow.dev` | `Requester@1234` | Raise tickets, view own queue |
 | Requester | `requester2@deskflow.dev` … `requester5@deskflow.dev` | `Requester@1234` | Additional requesters |
 
-Seed data also creates 6 categories (Hardware, Software, Network, Access & Accounts, Email, Other) and ~40 tickets spread across every status/priority with comments, notes, audit entries, SLA pauses, at-risk and breached tickets — so the dashboard looks alive on first login.
+The seed also creates 6 categories (Hardware, Software, Network, Access & Accounts, Email, Other) and ~40 tickets across every status and priority with comments, notes, audit entries, SLA pauses, at-risk and breached tickets — so the queue and the database look alive on first login.
 
 ## Architecture
 
@@ -81,18 +83,38 @@ flowchart LR
     GH -- "Scheduled */15 min: health ping + SLA scan" --> A
 ```
 
-- **Request flow:** Next.js page (server component) or client hook → `src/lib/api-client.ts` attaches `Authorization: Bearer <access_token>` → the request goes **same-origin** to `/api/v1/*` and is proxied server-side (Next.js `rewrites()`, `BACKEND_URL`) to FastAPI, which validates input + permissions → service (business rules, state machine, SLA, audit) → repository (SQL) → PostgreSQL. The refresh token never touches JS — it is an httpOnly cookie scoped to `/api/v1/auth`.
+- **Request flow:** a Next.js page (server component) or client hook → `src/lib/api-client.ts` attaches `Authorization: Bearer <access_token>` → the request goes **same-origin** to `/api/v1/*` and is proxied server-side (Next.js `rewrites()` via `BACKEND_URL`) to FastAPI, which validates input + permissions → service (business rules, state machine, SLA, audit) → repository (SQL) → PostgreSQL. The refresh token never touches JS — it lives in an `httpOnly` cookie scoped to `/api/v1/auth`.
+- **Layering is strict:** `router → service → repository → model`. Routers never touch SQLAlchemy; services never build HTTP responses.
 - Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Tech stack
 
 | Layer | Choice |
 |---|---|
-| Frontend | Next.js (App Router), React, TypeScript (strict), Tailwind CSS, shadcn/ui-style components, TanStack Query, React Hook Form + Zod, Recharts, lucide-react, Manrope |
+| Frontend | Next.js (App Router), React, TypeScript (strict), Tailwind CSS, shadcn/ui-style components (Radix + cva), TanStack Query, React Hook Form + Zod, lucide-react, Manrope |
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0 (sync), Pydantic v2, Alembic, PyJWT, argon2-cffi, slowapi |
 | Database | PostgreSQL 16 |
-| CI/CD | GitHub Actions → Neon (migrations), Vercel (API + web, via CLI) |
+| CI/CD | GitHub Actions → Neon (migrations) + Vercel (API + web, via CLI) |
 | Local infra | Docker Compose (Postgres only) |
+
+> Recharts is listed in the design docs for the dashboard, but the dashboard isn't built yet, so it isn't a runtime dependency.
+
+## CI/CD pipeline
+
+Order of operations: **CI → migrate → Vercel API → Vercel web**, plus a scheduled scan.
+
+1. **CI** — `.github/workflows/ci.yml`, on push and pull request to `main`:
+   - **backend job** — `ruff check .`, `ruff format --check .`, `pytest` against a Postgres 16 service container (a `deskflow_test` database is created first).
+   - **frontend job** — `npm ci`, `npm run lint`, `npm run typecheck`, `npm run build`.
+2. **Deploy** — `.github/workflows/deploy.yml`, triggered when CI completes on `main`; jobs run strictly in order (`needs:`):
+   - **migrate** — `alembic upgrade head` against Neon using the **direct** connection string (`NEON_DATABASE_URL`).
+   - **Vercel API** — `vercel pull && vercel build --prod && vercel deploy --prebuilt --prod` → `deskflow-api` (`backend/`, region `sin1`, pooled Neon URL + SQLAlchemy `NullPool`).
+   - **Vercel web** — same Vercel CLI flow → `deskflow-web` (`frontend/`, `BACKEND_URL = ${{ vars.API_BASE_URL }}`).
+3. **Scheduled** — `.github/workflows/scheduled.yml`, every 15 minutes:
+   - keep-warm `GET /api/v1/health` (`database: "up"`);
+   - `POST /api/v1/internal/sla-scan` with the `X-Internal-Token` header — the endpoint is not implemented yet (see backlog), so this step is currently a placeholder.
+
+Full setup guide (Neon/Vercel, every secret and variable, rollback, post-deploy smoke test): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Local setup
 
@@ -125,7 +147,7 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt -r requirements-dev.txt
 cp .env.example .env
 alembic upgrade head
-python -m app.db.seed
+python -m app.db.seed              # demo data + users
 uvicorn app.main:app --reload --port 8000
 
 # 3. Frontend (http://localhost:3000) — new terminal
@@ -154,7 +176,7 @@ Full reference: [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md).
 | `CORS_ORIGINS` | Allowed origins — only for direct-to-API testing (the app goes same-origin through the Next rewrite proxy) | `http://localhost:3000` |
 | `SLA_AT_RISK_THRESHOLD` | Fraction of SLA used that means AT_RISK | `0.75` |
 | `REOPEN_WINDOW_DAYS` | Days after CLOSED during which a ticket can be reopened | `7` |
-| `INTERNAL_TASK_TOKEN` | `X-Internal-Token` header required by `POST /api/v1/internal/sla-scan` (set by the GitHub scheduled workflow; must match its secret) | `local-internal-token` |
+| `INTERNAL_TASK_TOKEN` | `X-Internal-Token` required by the (planned) `POST /api/v1/internal/sla-scan` | `local-internal-token` |
 | `LOG_LEVEL` | `DEBUG` \| `INFO` \| `WARNING` | `INFO` |
 
 ### Frontend — `frontend/.env.local`
@@ -177,19 +199,7 @@ cd frontend
 npm run lint && npm run typecheck && npm run build
 ```
 
-Test cases are catalogued in [`docs/TESTING.md`](docs/TESTING.md) (auth, RBAC denials, every valid/invalid status transition, SLA pause/resume/breach math, auto-assignment, internal-note visibility, audit entries). CI runs the exact same commands on every push and pull request.
-
-## Deployment
-
-Push to `main` triggers `.github/workflows/deploy.yml`:
-
-1. **Migrate** — `alembic upgrade head` runs from GitHub Actions against the Neon database using the **direct** connection string (`NEON_DATABASE_URL` secret).
-2. **API** — the Vercel CLI (`vercel pull && vercel build --prod && vercel deploy --prebuilt --prod`) ships `deskflow-api` (root directory `backend`, Python serverless, region `sin1`) with `VERCEL_PROJECT_ID_API`. Runtime reads Neon's **pooled** `DATABASE_URL` and uses SQLAlchemy `NullPool`.
-3. **Web** — the same Vercel CLI flow ships `deskflow-web` (root directory `frontend`) with `VERCEL_PROJECT_ID_WEB`, `BACKEND_URL = ${{ vars.API_BASE_URL }}`.
-
-Additionally, `.github/workflows/scheduled.yml` runs every 15 minutes: it pings `GET /api/v1/health` on the API (`API_BASE_URL` repo variable) and calls `POST /api/v1/internal/sla-scan` with `X-Internal-Token` (`INTERNAL_TASK_TOKEN` secret) so SLA breaches are flagged and notified even when nobody has the app open — the scan is idempotent, so double runs change nothing.
-
-Full setup guide (Neon/Vercel, all secrets and variables, rollback, post-deploy smoke test): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+The suites cover auth, RBAC denials, every valid/invalid status transition, SLA pause/resume/breach math, auto-assignment and the audit trail ([`backend/tests/`](backend/tests/)); the catalogue lives in [`docs/TESTING.md`](docs/TESTING.md). CI runs the exact same commands on every push and pull request.
 
 ## Project structure
 
@@ -204,7 +214,7 @@ deskflow/
 └── AGENTS.md                 # AI-agent project rules
 ```
 
-Docs index (source of truth — keep in sync with code):
+Docs index (source of truth — kept in sync with the code):
 
 | Doc | What it defines |
 |---|---|
@@ -225,15 +235,26 @@ Docs index (source of truth — keep in sync with code):
 
 ## What I'd build next
 
-Given more time, in priority order (all currently on the [stretch list](docs/PRD.md#6-stretch-features-only-after-all-mvp-phases-are-ticked)):
+In priority order — finishing the partially-built surfaces first, then the stretch list:
 
-1. **File attachments** on tickets and comments (S3-compatible storage + signed URLs).
-2. **Email notifications** via a transactional email API for assignment, comments and SLA warnings.
-3. **WebSocket live updates** replacing the 30-second notification poll.
-4. **CSV export** of tickets and the audit log.
-5. **Dark mode** driven by the design-token layer.
-6. **SLA calendars** (pause targets outside business hours) and per-category SLA overrides.
-7. **Saved views / filters** and saved dashboard report ranges.
+**Finish the partial surfaces**
+
+1. **Dashboard** — `GET /api/v1/dashboard/stats` + `/dashboard`: KPI cards, tickets-per-day, SLA compliance trend, breakdowns, recent tickets.
+2. **Notifications** — `/notifications` endpoints (list, unread count, mark read) + the bell with 30 s polling.
+3. **Comments & internal notes** — `/tickets/{id}/comments` endpoints + the public/internal thread UI (visibility rules already enforced in the service).
+4. **Admin pages** — `/admin/users`, `/admin/categories`, `/admin/sla` over the existing APIs.
+5. **Global audit page** — `/audit` with URL-synced filters over `GET /api/v1/audit`.
+6. **`POST /api/v1/internal/sla-scan`** — wire the scheduled scan so breaches are flagged while the app is idle.
+
+**Stretch**
+
+7. **File attachments** on tickets and comments (S3-compatible storage + signed URLs).
+8. **Email notifications** for assignment, comments and SLA warnings.
+9. **WebSocket live updates** replacing notification polling.
+10. **CSV export** of tickets and the audit log.
+11. **Dark mode** driven by the design-token layer.
+12. **SLA calendars** (pause targets outside business hours) and per-category SLA overrides.
+13. **Saved views / filters** and saved dashboard report ranges.
 
 ## License
 
