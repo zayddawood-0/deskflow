@@ -4,5 +4,6 @@
   "git": {
     "deploymentEnabled": false
   },
-  "regions": ["sin1"]
+  "regions": ["sin1"],
+  "installCommand": "uv pip install -r requirements.txt"
 }

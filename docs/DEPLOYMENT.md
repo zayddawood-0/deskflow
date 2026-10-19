@@ -82,9 +82,9 @@ Setup:
 
 The API runs on Vercel's Python runtime as a serverless function:
 
-- `backend/vercel.json` — `"framework": "fastapi"`, `"regions": ["sin1"]` (same region as Neon), `"git": { "deploymentEnabled": false }` (deploys only via `deploy.yml`).
+- `backend/vercel.json` — `"framework": "fastapi"`, `"regions": ["sin1"]` (same region as Neon), `"git": { "deploymentEnabled": false }` (deploys only via `deploy.yml`), and `"installCommand": "uv pip install -r requirements.txt"` (see §3.3 — required so the builder installs `requirements.txt` instead of the dependency-less `pyproject.toml`).
 - `backend/index.py` — the recognized Vercel entrypoint; it re-exports the FastAPI `app` from `app.main`. Vercel's FastAPI preset serves the whole app from this single function (every path: `/api/v1/*`, `/docs`, `/api/v1/health`), with the project root on the import path.
-- `requirements.txt` at `backend/` root is installed by Vercel's Python builder, and `backend/.python-version` pins the function to Python `3.12`.
+- `requirements.txt` at `backend/` root is the dependency source, installed by Vercel's Python builder via the explicit `installCommand` in `vercel.json`; `backend/.python-version` pins the function to Python `3.12`.
 - `app/db/session.py` detects the runtime via the `VERCEL=1` env var Vercel sets and switches SQLAlchemy to **`NullPool`** — no persistent connection pool on an ephemeral instance; connections open per session and close with it, which is the correct shape for serverless + Neon's pooler.
 
 ### 3.1 Create the project
@@ -111,6 +111,7 @@ How to create/rotate each: [AUTH_AND_SECURITY §9](AUTH_AND_SECURITY.md#9-secret
 - `Settings` requires `SECRET_KEY` at import time; with `APP_ENV=production` it must be ≥ 32 chars or the function fails fast at cold start (by design).
 - An empty/missing `DATABASE_URL` fails with a clear `DATABASE_URL is required and must not be empty...` error instead of a cryptic SQLAlchemy URL parse error.
 - Cold starts are sub-second to a couple of seconds (Python module import + `create_engine` with NullPool — no connection is opened until a request needs one).
+- **Dependency install is explicit, not auto-detected.** Since Vercel CLI ≥ 48.2.0 the Python builder uses `uv` and, when both `pyproject.toml` and `requirements.txt` are present with no `uv.lock`, prefers **`pyproject.toml`** ([vercel/vercel#14041](https://github.com/vercel/vercel/issues/14041)). `backend/pyproject.toml` only holds ruff/pytest config (no `[project]` table), so the auto flow installed **zero** packages and every request died with `FUNCTION_INVOCATION_FAILED` / `ModuleNotFoundError: No module named 'fastapi'`. `vercel.json`'s `"installCommand": "uv pip install -r requirements.txt"` overrides that auto flow and installs from `requirements.txt` into the function venv. Do not add a `[project]` table or a stray `uv.lock` to `backend/` — keep `requirements.txt` the single dependency source for the API.
 
 ## 4. Vercel — deskflow-web (Next.js)
 
@@ -225,7 +226,7 @@ Triggering: `deploy.yml` fires on the **`workflow_run` completion of `ci.yml` on
 
 How the Vercel CLI jobs work: `vercel pull --yes --environment=production` downloads the project's production env vars (into `.vercel/`, git-ignored) and links to the project identified by `VERCEL_TOKEN` + `VERCEL_ORG_ID` + `VERCEL_PROJECT_ID_*`; `vercel build --prod` builds locally (Python lambda for the API, `next build` for the web app); `vercel deploy --prebuilt --prod` uploads the prebuilt output — no build happens on Vercel's side.
 
-The API job installs **`uv`** (`astral-sh/setup-uv`) before building: Vercel's Python builder uses `uv` to create the function venv and install `requirements.txt`. Vercel's own build image ships `uv`, but the GitHub runner does not — without this step `vercel build` fails with `[UV_ERROR] uv is required but was not found in PATH`. `uv python install 3.12` pre-fetches the interpreter (also pinned in `backend/.python-version`). The web job needs no `uv` — Next.js only.
+The API job installs **`uv`** (`astral-sh/setup-uv`) before building: Vercel's Python builder uses `uv` to create the function venv and run `vercel.json`'s `installCommand` (`uv pip install -r requirements.txt`); without that explicit command the builder would instead read the dependency-less `backend/pyproject.toml` and ship an empty venv (§3.3). Vercel's own build image ships `uv`, but the GitHub runner does not — without this step `vercel build` fails with `[UV_ERROR] uv is required but was not found in PATH`. `uv python install 3.12` pre-fetches the interpreter (also pinned in `backend/.python-version`). The web job needs no `uv` — Next.js only.
 
 Why `migrate` sets `SECRET_KEY`/`APP_ENV`: `alembic/env.py` calls `get_settings()` to read `DATABASE_URL`, and `Settings` requires `SECRET_KEY` — so the job must provide one (a throw-away literal is fine; the value is never used to sign anything during a migration) even though the DB URL is the only input that matters. `NEON_DATABASE_URL` is the sole secret this job needs; if it is unset, `DATABASE_URL` resolves to an empty string and Alembic fails immediately with the explicit `DATABASE_URL is required...` error.
 
