@@ -52,7 +52,7 @@ Time boxes assume ~half-day blocks; the order is chosen so there is always a **d
 
 ## Phase 6 — Seed, deploy, verify (~3 h)
 
-- [ ] 6.1 `app/db.seed` module: 1+3+5 users, 6 categories, 4 SLA policies, ~40 tickets across 45 days with comments/notes/audit/notifications; ≥3 breached, ≥3 at-risk, several paused; idempotent; demo credentials table in README verified
+- [x] 6.1 `app/db.seed` module: 1+3+5 users, 6 categories, 4 SLA policies, ~40 tickets across 45 days with comments/notes/audit/notifications; ≥3 breached, ≥3 at-risk, several paused; idempotent; demo credentials table in README verified
 - [ ] 6.2 GitHub repo: push, enable Actions; create Neon DB + two Vercel projects (`deskflow-api` root `backend`, `deskflow-web` root `frontend`) per DEPLOYMENT §2–§4; add all secrets + the `API_BASE_URL` variable (`INTERNAL_TASK_TOKEN` as **both** a GitHub secret and a deskflow-api env var, identical values)
 - [ ] 6.3 Wire `ci.yml` + `deploy.yml` (DEPLOYMENT §5); push to `main`; watch migrate → deploy-api → deploy-web go green
 - [ ] 6.4 Wire `scheduled.yml` (DEPLOYMENT §5.3: health keep-warm ping + SLA scan every 15 min); verify the first cron/manual run goes green and `/api/v1/health` returns `database: "up"`
