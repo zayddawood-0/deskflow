@@ -19,7 +19,7 @@ Password hashing: **argon2id** via `argon2-cffi` (`PasswordHasher`, default para
 
 ## 2. Login → refresh sequence
 
-All frontend calls are **same-origin**: the browser talks to `https://<vercel-domain>/api/v1/...` and Next.js `rewrites()` in `next.config.ts` proxies to `${BACKEND_URL}/api/v1/...` on Render. The cookie is therefore always sent automatically on `/api/v1/auth/*` requests — JS never reads or writes it.
+All frontend calls are **same-origin**: the browser talks to `https://<vercel-domain>/api/v1/...` and Next.js `rewrites()` in `next.config.ts` proxies to `${BACKEND_URL}/api/v1/...` on the deskflow-api Vercel project. The cookie is therefore always sent automatically on `/api/v1/auth/*` requests — JS never reads or writes it.
 
 ```mermaid
 sequenceDiagram
@@ -125,7 +125,7 @@ Enforcement points:
 
 ## 7. CORS configuration
 
-The browser **never talks to the Render API cross-origin**: the frontend calls same-origin `/api/v1/*` and Next.js `rewrites()` (server-side) proxies to `BACKEND_URL`. The refresh cookie is same-site by construction, and no CORS headers are required for the app itself.
+The browser **never talks to the API cross-origin**: the frontend calls same-origin `/api/v1/*` and Next.js `rewrites()` (server-side) proxies to `BACKEND_URL`. The refresh cookie is same-site by construction, and no CORS headers are required for the app itself.
 
 CORS is still configured on the API for two secondary consumers:
 
@@ -139,11 +139,11 @@ max_age=600
 ```
 
 - Local dev: `CORS_ORIGINS=http://localhost:3000` allows poking the API directly (Swagger experiments, curl from a browser extension) while the app itself still goes through the Next rewrite (`BACKEND_URL=http://localhost:8000`).
-- Production: leave `CORS_ORIGINS` empty or set to nothing meaningful — no browser origin needs it (Swagger UI on Render is served same-origin with the API). Never `*`.
+- Production: leave `CORS_ORIGINS` unset — no browser origin needs it (Swagger UI on the API deployment is served same-origin with the API). Never `*`.
 
 ## 8. Rate limiting
 
-- `slowapi` (`limits` storage: in-memory per process; documented as non-shared across instances — Render runs a single free instance, so it is exact).
+- `slowapi` (`limits` storage: **in-memory, per process**). On Vercel serverless each warm lambda instance keeps its own counters, so the limit is per-instance — best-effort by design (never crashes; exact locally and under light traffic). A shared store (e.g. Redis/Upstash) is the documented upgrade path, deliberately cut.
 - `POST /auth/login`: **5 requests/minute per client IP** → `429 RATE_LIMITED` with `Retry-After`.
 - `POST /auth/register`: 10/minute per IP.
 - All other endpoints: unlimited in MVP (per-instance reality: free tier; stretch = global limiter).
@@ -153,11 +153,10 @@ max_age=600
 
 | Secret | Local | Prod | Notes |
 |---|---|---|---|
-| `SECRET_KEY` | generated into `backend/.env` (never committed) | GitHub secret → Render env var | ≥ 32 random chars; rotating it invalidates all access tokens |
-| `DATABASE_URL` | docker-compose defaults in `.env.example` | Neon connection string (GitHub `NEON_DATABASE_URL` + Render env) | `postgresql+psycopg2://user:pass@host/db?sslmode=require` |
-| `INTERNAL_TASK_TOKEN` | local literal in `.env.example` | GitHub secret **and** Render env var (**must be the identical value**) | protects `/internal/sla-scan` via the `X-Internal-Token` header |
-| `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` | n/a | GitHub secrets only | CI/CD only, never in app runtime |
-| `RENDER_DEPLOY_HOOK_URL` | n/a | GitHub secret only | contains an unguessable hook id — treat as secret |
+| `SECRET_KEY` | generated into `backend/.env` (never committed) | deskflow-api Vercel env var | ≥ 32 random chars; rotating it invalidates all access tokens |
+| `DATABASE_URL` | docker-compose defaults in `.env.example` | Neon **pooled** connection string (deskflow-api Vercel env); migrations use the `NEON_DATABASE_URL` GitHub secret with the Neon **direct** endpoint | `postgresql+psycopg2://user:pass@host/db?sslmode=require` |
+| `INTERNAL_TASK_TOKEN` | local literal in `.env.example` | GitHub secret **and** deskflow-api Vercel env var (**must be the identical value**) | protects `/internal/sla-scan` via the `X-Internal-Token` header |
+| `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID_API` / `VERCEL_PROJECT_ID_WEB` | n/a | GitHub secrets only | CI/CD only, never in app runtime |
 
 Rules: `.env` and `.env.local` are git-ignored; only `backend/.env.example` and `frontend/.env.example` are committed; no secret appears in code, logs, audit rows, or the frontend bundle (`NEXT_PUBLIC_` vars are public by definition — never put tokens there).
 
@@ -166,14 +165,14 @@ Rules: `.env` and `.env.local` are git-ignored; only `backend/.env.example` and 
 | # | Risk | Mitigation in DeskFlow | Where |
 |---|---|---|---|
 | A01 | Broken access control | Server-side role + ownership checks on every endpoint; visibility baked into repository queries (404 for foreign tickets); admin-only routers behind `require_role`; state machine rejects illegal moves | `app/core/deps.py`, routers, `ticket_service.transition` |
-| A02 | Cryptographic failures | argon2id password hashing; HS256 JWT with strong `SECRET_KEY`; refresh tokens stored hashed (SHA-256); TLS everywhere (Vercel/Render/Neon force HTTPS); no plaintext secrets in repo | `app/core/security.py` |
+| A02 | Cryptographic failures | argon2id password hashing; HS256 JWT with strong `SECRET_KEY`; refresh tokens stored hashed (SHA-256); TLS everywhere (Vercel/Neon force HTTPS); no plaintext secrets in repo | `app/core/security.py` |
 | A03 | Injection | Parameterized SQLAlchemy only; no `text()` with interpolation; enums validated in Pydantic; React auto-escapes rendered text | repositories, schemas |
 | A04 | Insecure design | Layered architecture with one-way dependencies; audit log immutable (DB trigger); append-only audit = tamper evidence | [ARCHITECTURE §3](ARCHITECTURE.md#3-backend-layering) |
 | A05 | Security misconfiguration | CORS conservative and app-irrelevant (proxy; `allow_credentials=False`); Swagger UI **kept on in prod on purpose** (part of the demo; all endpoints still require auth) — see DEPLOYMENT; no default secrets (startup fails if `SECRET_KEY` is empty/short in prod); secure cookie flags in prod (`Secure`) | `app/core/config.py` |
 | A06 | Vulnerable components | Small, mainstream dependency set; `pip`/`npm` lockfiles committed; Dependabot optional | `requirements.txt`, `package-lock.json` |
 | A07 | Identification & auth failures | JWT + rotation, rate-limited login, generic failure messages, inactive users rejected at login **and** at token verification, password policy | §1–§5, §8 |
 | A08 | Data & integrity failures | Pydantic validation both sides; DB constraints (NOT NULL, UNIQUE, FK) as second line; single-transaction mutations (change + audit commit together) | schema, services |
-| A09 | Logging & monitoring failures | Structured request logs with `request_id`/`user_id` (tokens and passwords never logged); `GET /api/v1/health` for uptime checks; `scheduled.yml` pings health every 15 min to keep Render warm and runs the SLA scan | `app/core/logging.py` |
+| A09 | Logging & monitoring failures | Structured request logs with `request_id`/`user_id` (tokens and passwords never logged); `GET /api/v1/health` for uptime checks; `scheduled.yml` pings health every 15 min and runs the SLA scan | `app/core/logging.py` |
 | A10 | SSRF | None — the app makes no outbound requests at all in MVP | — |
 
-Explicit non-claims (honest scope): no CSRF tokens (the refresh cookie is `SameSite=Lax` + path-scoped + JSON-only endpoints — see §3), no WAF/bot protection, in-memory rate limiting (single Render instance), access token lives only in JS memory with a silent cookie refresh on boot.
+Explicit non-claims (honest scope): no CSRF tokens (the refresh cookie is `SameSite=Lax` + path-scoped + JSON-only endpoints — see §3), no WAF/bot protection, in-memory rate limiting (per serverless instance, best-effort — see §8), access token lives only in JS memory with a silent cookie refresh on boot.

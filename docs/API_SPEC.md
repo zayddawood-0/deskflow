@@ -4,7 +4,7 @@
 
 Base URL (local): `http://localhost:8000` · **All endpoints are prefixed with `/api/v1`** (health included). Interactive docs: `/docs` (Swagger UI) and `/redoc`.
 
-Browser traffic is **same-origin**: the Next.js app serves `/api/v1/*` and proxies to the backend via `rewrites()` (`BACKEND_URL`) — the browser never calls the Render origin directly, so CORS is irrelevant for the app (it exists only for local direct-to-API testing).
+Browser traffic is **same-origin**: the Next.js app serves `/api/v1/*` and proxies to the backend via `rewrites()` (`BACKEND_URL`) — the browser never calls the API origin directly, so CORS is irrelevant for the app (it exists only for local direct-to-API testing).
 
 Auth: `Authorization: Bearer <access_token>` (in-memory, JS-set) on every endpoint except where **Public** is listed. The **refresh token travels in an httpOnly cookie** (`Path=/api/v1/auth`) that the browser attaches automatically to the auth endpoints below — clients never see or send it manually. Roles: `requester`, `agent`, `admin`. An **agent** inherits requester powers (agents may also create tickets), an **admin** inherits agent powers.
 
@@ -148,7 +148,7 @@ Request query params: `page` (≥1, default `1`), `page_size` (1–100, default 
 
 | Method | Path | Roles | Description |
 |---|---|---|---|
-| GET | `/api/v1/health` | Public | Liveness + DB check (Render health check path; pinged every 15 min by `scheduled.yml`) |
+| GET | `/api/v1/health` | Public | Liveness + DB check (uptime check; pinged every 15 min by `scheduled.yml`) |
 
 **`GET /api/v1/health` → 200**
 
@@ -511,7 +511,7 @@ Scope: tickets with status ∈ {OPEN, IN_PROGRESS, ON_HOLD, REOPENED}; all four 
 
 Header: `X-Internal-Token: <INTERNAL_TASK_TOKEN>` (constant-time compare against the backend env var; wrong/missing → `403 FORBIDDEN`).
 
-Invoked by `.github/workflows/scheduled.yml` every 15 minutes (cron + `workflow_dispatch`), which also pings `/api/v1/health` to keep the Render instance warm. The same detection additionally runs on ticket reads/mutations, so the scan only catches tickets nobody is looking at.
+Invoked by `.github/workflows/scheduled.yml` every 15 minutes (cron + `workflow_dispatch`), which also pings `/api/v1/health`. The same detection additionally runs on ticket reads/mutations, so the scan only catches tickets nobody is looking at.
 
 **Idempotent by construction:** the breach flag is only flipped `false → true` (one audit row per ticket, ever); at-risk/breached notifications are skipped when a notification of the same `(user, type, ticket)` already exists — running the scan twice in a row changes nothing the second time.
 

@@ -1,22 +1,45 @@
+import os
 from collections.abc import Generator
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
 
 def normalize_database_url(url: str) -> str:
-    if url.startswith("postgres://"):
-        url = "postgresql+psycopg2://" + url.removeprefix("postgres://")
-    elif url.startswith("postgresql://"):
-        url = "postgresql+psycopg2://" + url.removeprefix("postgresql://")
-    if "sslmode=" not in url and "@localhost" not in url and "@127.0.0.1" not in url:
-        url += ("&" if "?" in url else "?") + "sslmode=require"
-    return url
+    """Return a SQLAlchemy-ready URL. Pure function: no I/O, no global state, no mutation."""
+    cleaned = url.strip()
+    if not cleaned:
+        raise ValueError(
+            "DATABASE_URL is required and must not be empty. Set it in the environment "
+            "(or backend/.env); on Vercel it must be Neon's POOLED connection string."
+        )
+    if cleaned.startswith("postgres://"):
+        cleaned = "postgresql+psycopg2://" + cleaned.removeprefix("postgres://")
+    elif cleaned.startswith("postgresql://"):
+        cleaned = "postgresql+psycopg2://" + cleaned.removeprefix("postgresql://")
+    if "sslmode=" not in cleaned and "@localhost" not in cleaned and "@127.0.0.1" not in cleaned:
+        cleaned += ("&" if "?" in cleaned else "?") + "sslmode=require"
+    return cleaned
 
 
-engine = create_engine(normalize_database_url(get_settings().database_url), pool_pre_ping=True)
+def is_running_on_vercel() -> bool:
+    return os.environ.get("VERCEL") == "1"
+
+
+def create_db_engine() -> Engine:
+    poolclass = NullPool if is_running_on_vercel() else None
+    return create_engine(
+        normalize_database_url(get_settings().database_url),
+        pool_pre_ping=True,
+        poolclass=poolclass,
+    )
+
+
+engine: Engine = create_db_engine()
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 

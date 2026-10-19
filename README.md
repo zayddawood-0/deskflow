@@ -42,11 +42,11 @@ Built as a screening project for the **ETL Full Stack Web Developer internship**
 
 | App | URL |
 |---|---|
-| Frontend (Vercel) | https://deskflow-web.vercel.app |
-| API (Render) | https://deskflow-api.onrender.com |
-| API docs (Swagger) | https://deskflow-api.onrender.com/docs |
+| Frontend (Vercel — deskflow-web) | https://deskflow-web.vercel.app |
+| API (Vercel — deskflow-api, Python serverless) | https://deskflow-api.vercel.app |
+| API docs (Swagger) | https://deskflow-api.vercel.app/docs |
 
-> Render free tier spins down after inactivity — the first load may take ~30–60 s while the API cold-starts. The frontend shows a "waking up" skeleton and retries automatically.
+> Both apps are Vercel projects (`backend` and `frontend` root directories) deployed only through GitHub Actions + the Vercel CLI. The API idles to zero as a serverless function — the first request may take a few seconds cold; the frontend shows a "waking up" skeleton and retries automatically.
 
 ## Demo credentials
 
@@ -71,13 +71,13 @@ flowchart LR
         B[Browser<br/>Next.js on Vercel<br/>server + client components]
     end
     subgraph Server
-        A[FastAPI on Render<br/>/api/v1 · routers → services → repositories]
+        A[FastAPI on Vercel<br/>Python serverless · sin1 · NullPool<br/>/api/v1 · routers → services → repositories]
     end
     DB[(PostgreSQL 16<br/>Neon in prod · Docker locally)]
     B -- "same-origin /api/v1/* (Bearer JWT in memory<br/>+ httpOnly refresh cookie)" --> A
     A -- SQLAlchemy 2.0 sync --> DB
     GH[GitHub Actions] -- CI: ruff, pytest, lint, tsc, build --> B & A
-    GH -- CD: alembic upgrade head → Neon, deploy hook → Render, vercel deploy --prod --> A & B
+    GH -- CD: alembic upgrade head → Neon, vercel deploy --prod (API, then web) --> A & B
     GH -- "Scheduled */15 min: health ping + SLA scan" --> A
 ```
 
@@ -91,7 +91,7 @@ flowchart LR
 | Frontend | Next.js (App Router), React, TypeScript (strict), Tailwind CSS, shadcn/ui-style components, TanStack Query, React Hook Form + Zod, Recharts, lucide-react, Manrope |
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0 (sync), Pydantic v2, Alembic, PyJWT, argon2-cffi, slowapi |
 | Database | PostgreSQL 16 |
-| CI/CD | GitHub Actions → Neon (migrations), Render (API), Vercel (web) |
+| CI/CD | GitHub Actions → Neon (migrations), Vercel (API + web, via CLI) |
 | Local infra | Docker Compose (Postgres only) |
 
 ## Local setup
@@ -183,13 +183,13 @@ Test cases are catalogued in [`docs/TESTING.md`](docs/TESTING.md) (auth, RBAC de
 
 Push to `main` triggers `.github/workflows/deploy.yml`:
 
-1. **Migrate** — `alembic upgrade head` runs from GitHub Actions against the Neon database (`NEON_DATABASE_URL` secret).
-2. **Backend** — a `curl` hits the Render deploy hook (`RENDER_DEPLOY_HOOK_URL`), which rebuilds and redeploys `deskflow-api`.
-3. **Frontend** — the Vercel CLI (`vercel pull && vercel build --prod && vercel deploy --prebuilt --prod`) ships `deskflow-web` with `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
+1. **Migrate** — `alembic upgrade head` runs from GitHub Actions against the Neon database using the **direct** connection string (`NEON_DATABASE_URL` secret).
+2. **API** — the Vercel CLI (`vercel pull && vercel build --prod && vercel deploy --prebuilt --prod`) ships `deskflow-api` (root directory `backend`, Python serverless, region `sin1`) with `VERCEL_PROJECT_ID_API`. Runtime reads Neon's **pooled** `DATABASE_URL` and uses SQLAlchemy `NullPool`.
+3. **Web** — the same Vercel CLI flow ships `deskflow-web` (root directory `frontend`) with `VERCEL_PROJECT_ID_WEB`, `BACKEND_URL = ${{ vars.API_BASE_URL }}`.
 
-Additionally, `.github/workflows/scheduled.yml` runs every 15 minutes: it pings `GET /api/v1/health` (keeps the Render free instance warm) and calls `POST /api/v1/internal/sla-scan` with `X-Internal-Token` (`INTERNAL_TASK_TOKEN` secret) so SLA breaches are flagged and notified even when nobody has the app open — the scan is idempotent, so double runs change nothing.
+Additionally, `.github/workflows/scheduled.yml` runs every 15 minutes: it pings `GET /api/v1/health` on the API (`API_BASE_URL` repo variable) and calls `POST /api/v1/internal/sla-scan` with `X-Internal-Token` (`INTERNAL_TASK_TOKEN` secret) so SLA breaches are flagged and notified even when nobody has the app open — the scan is idempotent, so double runs change nothing.
 
-Full setup guide (Neon/Render/Vercel, all secrets, rollback, post-deploy smoke test): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Full setup guide (Neon/Vercel, all secrets and variables, rollback, post-deploy smoke test): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Project structure
 
@@ -218,7 +218,7 @@ Docs index (source of truth — keep in sync with code):
 | [`docs/FRONTEND_SPEC.md`](docs/FRONTEND_SPEC.md) | Routes, pages, hooks, folder layout |
 | [`docs/BACKEND_SPEC.md`](docs/BACKEND_SPEC.md) | Backend structure, services, seed, Alembic |
 | [`docs/TESTING.md`](docs/TESTING.md) | Test strategy + concrete test list |
-| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | CI/CD, Neon/Render/Vercel, secrets |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | CI/CD, Neon/Vercel, secrets |
 | [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) | Every env var + `.env.example` contents |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | Time-boxed build plan |
 | [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) | 3–5 minute reviewer walkthrough |

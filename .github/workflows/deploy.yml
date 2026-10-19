@@ -34,17 +34,31 @@ jobs:
       - run: pip install -r requirements.txt
       - run: alembic upgrade head
 
-  deploy-backend:
-    name: Render deploy hook
+  deploy-api:
+    name: Vercel — deskflow-api
     needs: migrate
     runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_API }}
     steps:
-      - name: Trigger Render deploy
-        run: curl --fail --silent --show-error -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+      - run: npx vercel pull --yes --environment=production
+      - run: npx vercel build --prod
+      - run: npx vercel deploy --prebuilt --prod
 
-  deploy-frontend:
-    name: Vercel production deploy
-    needs: migrate
+  deploy-web:
+    name: Vercel — deskflow-web
+    needs: deploy-api
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -52,8 +66,8 @@ jobs:
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      BACKEND_URL: https://deskflow-api.onrender.com
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_WEB }}
+      BACKEND_URL: ${{ vars.API_BASE_URL }}
     steps:
       - uses: actions/checkout@v7
         with:

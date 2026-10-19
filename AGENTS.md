@@ -2,7 +2,7 @@
 
 ## Project overview (5 lines)
 
-DeskFlow is a full-stack IT helpdesk & ticketing system: employees raise support tickets, agents work them through a status workflow with SLA timers, and admins manage users/categories/SLA policies with an audit log and analytics dashboard. It is a screening project for the ETL Full Stack Web Developer internship, due **Monday 19 October 2026**, built by one developer + an AI agent in ~1 day. Monorepo: `/frontend` (Next.js App Router + TypeScript), `/backend` (FastAPI + SQLAlchemy 2.0 + PostgreSQL), `/docs` (single source of truth). Three roles: `requester`, `agent`, `admin` (RBAC enforced on backend AND frontend). Everything ships through GitHub Actions CI/CD to Neon (DB), Render (API), Vercel (web).
+DeskFlow is a full-stack IT helpdesk & ticketing system: employees raise support tickets, agents work them through a status workflow with SLA timers, and admins manage users/categories/SLA policies with an audit log and analytics dashboard. It is a screening project for the ETL Full Stack Web Developer internship, due **Monday 19 October 2026**, built by one developer + an AI agent in ~1 day. Monorepo: `/frontend` (Next.js App Router + TypeScript), `/backend` (FastAPI + SQLAlchemy 2.0 + PostgreSQL), `/docs` (single source of truth). Three roles: `requester`, `agent`, `admin` (RBAC enforced on backend AND frontend). Everything ships through GitHub Actions CI/CD to Neon (DB) and Vercel (API + web, two projects).
 
 ## Tech stack (fixed — do not change)
 
@@ -11,7 +11,7 @@ DeskFlow is a full-stack IT helpdesk & ticketing system: employees raise support
 | Frontend | Next.js (App Router, stable) · React · TypeScript (strict) · Tailwind CSS · shadcn/ui-style components (Radix primitives + cva) · TanStack Query · React Hook Form + Zod · Recharts · lucide-react · Manrope via `next/font` |
 | Backend | Python 3.12 · FastAPI · **SQLAlchemy 2.0 sync** (psycopg2) · Pydantic v2 · Alembic · PyJWT · argon2-cffi · slowapi (login rate limit) · pytest + httpx TestClient · ruff |
 | Database | PostgreSQL 16 (local via Docker Compose, prod on Neon) |
-| Deploy | CI: GitHub Actions (ruff, pytest, next lint/tsc/build). CD: Alembic → Neon, Render deploy hook, Vercel CLI |
+| Deploy | CI: GitHub Actions (ruff, pytest, next lint/tsc/build). CD: Alembic → Neon, Vercel CLI → API + web |
 
 Sync SQLAlchemy is a deliberate choice (see `docs/ARCHITECTURE.md` → Key decisions). **Never mix async DB code into this repo.**
 

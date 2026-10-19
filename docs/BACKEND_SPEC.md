@@ -118,7 +118,7 @@ def get_settings() -> Settings: ...
 ```
 
 - Startup guard: if `app_env == "production"` and `secret_key` is empty/short (<32 chars) → fail fast.
-- `DATABASE_URL` normalization in `session.py`: replace `postgres://` → `postgresql+psycopg2://`, ensure `sslmode=require` when the host is not `localhost` (Neon/Render friendly).
+- `DATABASE_URL` normalization in `session.py`: pure function that replaces `postgres://`/`postgresql://` → `postgresql+psycopg2://`, ensures `sslmode=require` when the host is not `localhost` (Neon friendly), strips surrounding whitespace, and raises a clear `DATABASE_URL is required and must not be empty` error for an empty value. On Vercel (`VERCEL=1`) the engine uses `NullPool` (serverless).
 
 ## 3. Dependency injection (`app/core/deps.py`)
 
@@ -236,7 +236,7 @@ Counter starts at 1040 → seeded tickets run `TCK-1041`…. Every seeded ticket
 1. Local: edit models → `alembic revision --autogenerate -m "..."` (requires a migrated dev DB) → review the generated file (autogenerate misses enums defaults/trigger — hand-fix) → `alembic upgrade head`.
 2. Never edit an applied revision; fix forward with a new one.
 3. The initial migration `0001_initial.py` contains: all enums, all tables, all indexes/constraints, the `trg_audit_logs_immutable` trigger, the `('ticket', 1040)` counter row, and the 4 `sla_policies` rows (production-safe, idempotent seeding of those rows lives in the migration itself so prod matches local).
-4. CI/CD: `deploy.yml` job `migrate` runs `alembic upgrade head` with `DATABASE_URL=$NEON_DATABASE_URL` **before** triggering the Render deploy ([DEPLOYMENT §6](DEPLOYMENT.md#6-migration-strategy)).
+4. CI/CD: `deploy.yml` job `migrate` runs `alembic upgrade head` with `DATABASE_URL=$NEON_DATABASE_URL` (Neon **direct** endpoint) **before** deploying the API to Vercel ([DEPLOYMENT §6](DEPLOYMENT.md#6-migration-strategy)).
 5. Tests do **not** use Alembic: `conftest.py` creates the schema with `Base.metadata.create_all` on a dedicated test database (fast, no migration drift); the migration itself is exercised manually + in the deploy pipeline.
 
 ## 11. App entrypoint (`app/main.py`)
@@ -257,4 +257,4 @@ def create_app() -> FastAPI:
 app = create_app()
 ```
 
-Run: `uvicorn app.main:app --reload --port 8000` (dev) / `uvicorn app.main:app --host 0.0.0.0 --port $PORT` (Render).
+Run: `uvicorn app.main:app --reload --port 8000` (dev) / on Vercel the `@vercel/python` runtime imports the same `app` via the entrypoint `index.py` (`from app.main import app`) — no uvicorn in production.

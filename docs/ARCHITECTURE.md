@@ -13,13 +13,13 @@ flowchart TB
         U["Browser"]
         N["Next.js App Router<br/>React Server Components + Client Components<br/>TanStack Query · React Hook Form + Zod · Recharts<br/>same-origin /api/v1/* → rewrites() proxy"]
     end
-    subgraph server["Server — Render"]
-        R["FastAPI (Python 3.12)<br/>/api/v1<br/>routers → services → repositories<br/>JWT auth (httpOnly refresh cookie) · RBAC · slowapi rate limit"]
+    subgraph server["Server — Vercel (Python serverless, sin1)"]
+        R["FastAPI (Python 3.12)<br/>/api/v1<br/>routers → services → repositories<br/>JWT auth (httpOnly refresh cookie) · RBAC · slowapi (in-memory, per-instance)<br/>SQLAlchemy NullPool on serverless"]
     end
     subgraph data["Data — Neon (PostgreSQL 16)"]
         DB[("PostgreSQL<br/>users · categories · sla_policies · tickets<br/>ticket_comments · audit_logs · notifications · refresh_tokens · counters")]
     end
-    G["GitHub Actions<br/>CI (ruff, pytest, lint, tsc, build)<br/>CD (alembic → Neon, Render hook, Vercel CLI)<br/>Scheduled (health ping + SLA scan every 15 min)"]
+    G["GitHub Actions<br/>CI (ruff, pytest, lint, tsc, build)<br/>CD (alembic → Neon, Vercel CLI → API + web)<br/>Scheduled (health ping + SLA scan every 15 min)"]
 
     U -- "HTTPS · same-origin /api/v1/* · Bearer access token (memory)<br/>refresh cookie (httpOnly, Path=/api/v1/auth)" --> N
     N -- "Next.js rewrites proxy → BACKEND_URL" --> R
@@ -29,7 +29,7 @@ flowchart TB
     G -. schema migrations .-> DB
 ```
 
-Environments: **local** (Postgres in Docker Compose, API + web on the same machine, hot reload), **production** (Neon + Render + Vercel). Identical code in both; only env vars differ ([ENVIRONMENT](ENVIRONMENT.md)).
+Environments: **local** (Postgres in Docker Compose, API + web on the same machine, hot reload), **production** (Neon + Vercel: two projects — `deskflow-api` on the Python runtime, `deskflow-web` for Next.js). Identical code in both; only env vars differ ([ENVIRONMENT](ENVIRONMENT.md)).
 
 ## 2. Request flow
 
@@ -141,7 +141,7 @@ One shape for every non-2xx response ([API_SPEC §2](API_SPEC.md#2-standard-enve
 
 ### 5.2 Logging
 
-- Structured JSON logs to stdout (Render/Vercel capture them): `timestamp`, `level`, `request_id` (middleware-injected UUID), `method`, `path`, `status_code`, `duration_ms`, `user_id` (when authenticated).
+- Structured JSON logs to stdout (Vercel captures them): `timestamp`, `level`, `request_id` (middleware-injected UUID), `method`, `path`, `status_code`, `duration_ms`, `user_id` (when authenticated).
 - Never log passwords, tokens, or full request bodies of `/auth/login`.
 
 ### 5.3 CORS
@@ -167,13 +167,14 @@ One shape for every non-2xx response ([API_SPEC §2](API_SPEC.md#2-standard-enve
 |---|---|---|---|
 | D1 | **Sync SQLAlchemy 2.0 + psycopg2** (not async) | A 1-day build cannot afford async plumbing everywhere (session, migrations, test fixtures, seed). FastAPI runs sync endpoints in a threadpool; at this scale throughput is irrelevant. | Not suitable for thousands of concurrent DB-bound users. |
 | D2 | **Repository layer despite small size** | Screening criterion: shows clean architecture. Keeps SQL in one place, makes services testable. | Slightly more boilerplate. |
-| D3 | **Same-origin `/api/v1/*` via Next rewrites + httpOnly refresh cookie** | The browser only ever talks to one origin; the Vercel→Render hop happens server-side in the rewrite proxy. The refresh token is invisible to JS (`HttpOnly`), path-scoped to `/api/v1/auth`, and `SameSite=Lax` blocks cross-site state-changing requests — no CSRF surface, no CORS/cookie-config rabbit hole on free tiers. | Route gating is client-side (the path-scoped cookie isn't visible to `middleware.ts` on page loads); access token lives in JS memory and is re-hydrated by one silent refresh on boot. Details: [AUTH_AND_SECURITY §3](AUTH_AND_SECURITY.md#3-token-storage-frontend). |
+| D3 | **Same-origin `/api/v1/*` via Next rewrites + httpOnly refresh cookie** | The browser only ever talks to one origin; the deskflow-web→deskflow-api hop happens server-side in the rewrite proxy. The refresh token is invisible to JS (`HttpOnly`), path-scoped to `/api/v1/auth`, and `SameSite=Lax` blocks cross-site state-changing requests — no CSRF surface, no CORS/cookie-config rabbit hole on free tiers. | Route gating is client-side (the path-scoped cookie isn't visible to `middleware.ts` on page loads); access token lives in JS memory and is re-hydrated by one silent refresh on boot. Details: [AUTH_AND_SECURITY §3](AUTH_AND_SECURITY.md#3-token-storage-frontend). |
 | D4 | **SLA state computed on read, breach flag persisted** | `ON_TRACK`/`AT_RISK` depend on "now" — storing them would go stale. Only the irreversible `sla_breached` boolean is persisted (for KPIs + one-shot notifications), updated on ticket reads/mutations and by the `internal/sla-scan` endpoint. | A ticket nobody reads stays un-flagged until the scan runs; acceptable — the scan endpoint exists and is trivially cron-able. |
 | D5 | **Due dates shifted forward on resume from ON_HOLD** (instead of storing a pause offset only) | Keeps "time remaining" a trivial `due_at - now` for the UI; pause math stays in one place (the resume handler). | Naive `due_at - now` while currently paused would be wrong — the UI checks `paused_at` and shows "Paused". |
 | D6 | **Append-only audit via service writes + DB trigger** | Defense in depth: application forgetfulness is caught in review/tests; direct SQL tampering is blocked by a trigger that raises on UPDATE/DELETE of `audit_logs`. | Trigger adds one Alembic migration step. |
-| D7 | **Polling (30 s) instead of WebSockets** | WebSocket infra on Render free tier is unreliable; polling is demo-proof and ~30 lines of code. | Up to 30 s latency for notifications. Listed as stretch S3. |
-| D8 | **Monorepo** | One clone, one CI, docs next to code — ideal for a 1-day build and for review. | Separate deploys still required (Render/Vercel point at subdirs). |
-| D9 | **Alembic migrations run from CI/CD, not from the app** | Render's ephemeral filesystem + single web process makes app-start migrations racy; running `alembic upgrade head` in the deploy workflow is deterministic and visible in the Actions log. | Requires `NEON_DATABASE_URL` secret kept in sync. |
+| D7 | **Polling (30 s) instead of WebSockets** | Long-lived WebSocket connections fit poorly with stateless serverless functions; polling is demo-proof and ~30 lines of code. | Up to 30 s latency for notifications. Listed as stretch S3. |
+| D8 | **Monorepo, two Vercel projects** | One clone, one CI, docs next to code — ideal for a 1-day build and for review. | Separate deploys still required (each Vercel project points at a subdirectory: `backend` / `frontend`). |
+| D9 | **Alembic migrations run from CI/CD, not from the app** | Serverless functions boot per request with no reliable single "startup" — app-start migrations would be racy and slow every cold start; running `alembic upgrade head` in the deploy workflow is deterministic and visible in the Actions log. | Requires `NEON_DATABASE_URL` (direct endpoint) kept in sync; runtime uses the pooled string. |
+| D11 | **`NullPool` on Vercel, default pool locally** | Serverless instances are ephemeral — a persistent pool would leak idle connections and fight Neon's PgBouncer. Detected via the `VERCEL=1` env var; no persistent connections, per-session only. | Slightly higher per-request connection latency; Neon's pooler absorbs it. |
 | D10 | **shadcn/ui-style components hand-written** (Radix + cva, no CLI) | Full control of tokens (orange accent, 24px radii) and no generator output to fight; matches the reference dashboard exactly. | Cannot later run `npx shadcn add` blindly — components are already ours. |
 
 ## 7. Deployment topology
@@ -188,19 +189,19 @@ flowchart LR
     subgraph neon["Neon"]
         PG[("PostgreSQL 16<br/>serverless")]
     end
-    subgraph render["Render — deskflow-api"]
-        API["FastAPI / uvicorn<br/>health: GET /api/v1/health"]
+    subgraph vercelapi["Vercel — deskflow-api (sin1)"]
+        API["FastAPI on @vercel/python<br/>entrypoint index.py<br/>health: GET /api/v1/health"]
     end
     subgraph vercel["Vercel — deskflow-web"]
         WEB["Next.js<br/>rewrites /api/* → BACKEND_URL"]
     end
     PUSH --> WF
     WF -- "1. alembic upgrade head" --> PG
-    WF -- "2. POST deploy hook" --> API
+    WF -- "2. vercel deploy --prod (prebuilt)" --> API
     API --> PG
-    WF -- "3. vercel deploy --prod" --> WEB
+    WF -- "3. vercel deploy --prod (prebuilt)" --> WEB
     WEB -- "server-side proxy (BACKEND_URL)" --> API
-    SCH -- "GET /api/v1/health (keep warm)" --> API
+    SCH -- "GET /api/v1/health (uptime check)" --> API
     SCH -- "POST /api/v1/internal/sla-scan (X-Internal-Token)" --> API
 ```
 

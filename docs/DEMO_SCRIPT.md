@@ -56,7 +56,7 @@ Audience: the ETL reviewer/interviewer. Goal: show the full lifecycle, the SLA e
 
 ## Closing line (~15 s)
 
-> "FastAPI with a strict router→service→repository layering, sync SQLAlchemy and Alembic; Next.js App Router with TanStack Query and a token-based auth flow; every value in this demo comes from the docs in `/docs`, which are the source of truth — schema, API, workflows and this script stay in sync with the code. CI runs ruff, pytest and the full frontend build on every push; deploys migrate Neon first, then Render and Vercel."
+> "FastAPI with a strict router→service→repository layering, sync SQLAlchemy and Alembic; Next.js App Router with TanStack Query and a token-based auth flow; every value in this demo comes from the docs in `/docs`, which are the source of truth — schema, API, workflows and this script stay in sync with the code. CI runs ruff, pytest and the full frontend build on every push; deploys migrate Neon first, then deploy the API and web as two Vercel projects."
 
 ---
 
@@ -65,7 +65,7 @@ Audience: the ETL reviewer/interviewer. Goal: show the full lifecycle, the SLA e
 | Question | Answer in one breath |
 |---|---|
 | Why sync SQLAlchemy? | 1-day scope: sync keeps migrations, services and test fixtures simple; FastAPI runs it in a threadpool; the throughput is irrelevant at this scale. |
-| Why polling instead of WebSockets? | Render free tier + reliability under demo conditions; 30 s latency is acceptable for in-app notifications; WebSocket is the top stretch item. |
+| Why polling instead of WebSockets? | Long-lived sockets fit poorly with stateless serverless functions, and polling is reliable under demo conditions; 30 s latency is acceptable for in-app notifications; WebSocket is the top stretch item. |
 | Where is the SLA state stored? | Nowhere — `ON_TRACK/AT_RISK/BREACHED` is computed on every read; only the irreversible `sla_breached` flag is persisted (for KPIs and one-shot notifications). |
 | How do you prevent SQL injection / XSS? | Parameterized SQLAlchemy everywhere; React escapes all rendered text; no HTML injection surface. |
 | How is RBAC enforced? | Backend dependency (`require_roles`) + ownership checks + the transition matrix on every endpoint; the frontend guards are UX only. |

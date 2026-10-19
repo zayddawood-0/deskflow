@@ -28,7 +28,7 @@ Small companies (10–200 people) handle internal IT support through a shared em
 | G5 | Every change is traceable | Append-only audit log; per-ticket timeline; global admin log |
 | G6 | Admins can configure the system without code changes | Manage users/roles, categories, SLA policies |
 | G7 | A reviewer understands the state of IT support in 5 seconds | Dashboard with KPI cards and charts |
-| G8 | The whole thing is production-shaped | Auth + RBAC, tests, CI/CD to Neon/Render/Vercel |
+| G8 | The whole thing is production-shaped | Auth + RBAC, tests, CI/CD to Neon/Vercel |
 
 ## 3. Non-goals (explicitly out of MVP)
 
