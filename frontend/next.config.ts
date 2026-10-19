@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
-const backendUrl = process.env.BACKEND_URL ?? "http://localhost:8000";
+const rawBackendUrl = process.env.BACKEND_URL ?? "http://localhost:8000";
+const backendUrl = /^https?:\/\//.test(rawBackendUrl)
+  ? rawBackendUrl
+  : `https://${rawBackendUrl}`;
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
